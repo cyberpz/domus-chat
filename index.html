@@ -1,0 +1,1810 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#00ff41">
+<title>DOMUS//CHAT</title>
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="/icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="DomusChat">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* ═══ Jarvis Domus — phosphor terminal theme ═══ */
+  :root {
+    --bg: #000a00; --surface: #000f05; --surface2: #001a08;
+    --green: #00ff41; --green-dim: #00aa28; --green-glow: rgba(0,255,65,0.12);
+    --cyan: #00d4ff; --red: #ff1f4b; --amber: #ffb300; --purple: #b060ff;
+    --text: #aaffaa; --text-dim: #447744;
+    --border: rgba(0,255,65,0.18); --border-bright: rgba(0,255,65,0.55);
+    --user-bubble: #00240a; --bot-bubble: #000f05;
+    --head-h: 52px;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: var(--font-mono);
+    background: var(--bg);
+    background-image:
+      linear-gradient(rgba(0,255,65,0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,255,65,0.025) 1px, transparent 1px);
+    background-size: 40px 40px;
+    color: var(--text);
+    display: flex; height: 100vh; overflow: hidden;
+    font-size: 14px;
+  }
+  /* viewport reale (barre dinamiche + tastiera) */
+  @supports (height: 100dvh) { body { height: 100dvh; } }
+  /* CRT scanlines */
+  body::after {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 900;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,0.14) 0 1px, transparent 1px 3px);
+    mix-blend-mode: multiply;
+  }
+  ::selection { background: var(--green-dim); color: #000; }
+  ::-webkit-scrollbar { width: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--green-dim); border-radius: 0; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--green); }
+  button, select, textarea, input { font-family: var(--font-mono); }
+
+  /* ── sidebar ─────────────────────── */
+  #sidebar {
+    width: 264px; min-width: 264px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    /* sta SOPRA l'overlay del system prompt: il velo scuro copre la main page,
+       non la tab laterale */
+    position: relative; z-index: 595;
+  }
+  #sidebar .side-head {
+    height: var(--head-h); padding: 0 14px; flex-shrink: 0;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .logo {
+    font-size: 15px; font-weight: 700; letter-spacing: 0.15em;
+    color: var(--green); text-shadow: 0 0 8px var(--green);
+    animation: flicker 4s infinite;
+    white-space: nowrap;
+  }
+  @keyframes flicker {
+    0%,94%,100% { opacity: 1; }
+    95% { opacity: 0.72; }
+    96% { opacity: 1; }
+    97% { opacity: 0.85; }
+  }
+  .side-head .ver { font-size: 9px; color: var(--text-dim); letter-spacing: 0.1em; }
+  #new-chat {
+    margin: 12px 12px 6px; padding: 9px 12px;
+    background: transparent; color: var(--green);
+    border: 1px solid var(--border-bright);
+    cursor: pointer; font-size: 11px; font-weight: 600;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    transition: all .15s;
+  }
+  #new-chat:hover { background: var(--green); color: #000; box-shadow: 0 0 12px var(--green-glow); }
+  #conv-list { flex: 1; overflow-y: auto; padding: 6px 8px 12px; }
+  .conv {
+    padding: 8px 10px; margin-bottom: 4px; cursor: pointer;
+    border: 1px solid transparent; border-left: 2px solid transparent;
+    display: flex; align-items: center; gap: 8px;
+    transition: all .12s; font-size: 12px;
+  }
+  .conv:hover { background: var(--surface2); border-left-color: var(--green-dim); }
+  .conv.active { background: var(--surface2); border-left-color: var(--green); }
+  .conv.active .title { color: var(--green); text-shadow: 0 0 6px var(--green-glow); }
+  .conv .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+  .conv .del {
+    background: none; border: none; color: var(--text-dim); cursor: pointer;
+    font-size: 13px; padding: 2px 5px; opacity: 0; transition: all .12s;
+  }
+  .conv:hover .del, .conv:hover .ren { opacity: 1; }
+  .conv .del:hover { color: var(--red); text-shadow: 0 0 6px var(--red); }
+  .conv .ren {
+    background: none; border: none; color: var(--text-dim); cursor: pointer;
+    font-size: 12px; padding: 2px 4px; opacity: 0; transition: all .12s;
+  }
+  .conv .ren:hover { color: var(--green); }
+  .rename-input {
+    flex: 1; min-width: 0; background: var(--surface2); color: var(--text);
+    border: 1px solid var(--border-bright); padding: 2px 6px; font-size: 12px;
+  }
+  .rename-input:focus { outline: none; }
+  @media (pointer: coarse) { .conv .ren, .conv .del { opacity: .7; } }
+  #share-btn {
+    background: none; border: 1px solid transparent; color: var(--text-dim);
+    font-size: 14px; cursor: pointer; padding: 2px 8px; border-radius: 5px;
+  }
+  #share-btn:hover { color: var(--green); border-color: var(--border); }
+  .side-foot {
+    padding: 10px 14px; border-top: 1px solid var(--border);
+    font-size: 9px; color: var(--text-dim); letter-spacing: 0.08em;
+    display: flex; justify-content: space-between;
+  }
+
+  /* ── main ───────────────────────── */
+  #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  #topbar {
+    display: flex; align-items: center; gap: 14px;
+    height: var(--head-h); padding: 0 18px; flex-shrink: 0;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: nowrap; min-width: 0;
+  }
+  #pill {
+    font-size: 9px; padding: 4px 10px; border: 1px solid var(--border);
+    color: var(--text-dim); letter-spacing: 0.1em; text-transform: uppercase;
+    white-space: nowrap; min-width: 110px; text-align: center;
+  }
+  #pill.ok { color: var(--green); border-color: var(--border-bright); text-shadow: 0 0 6px var(--green-glow); }
+  #pill.load { color: var(--amber); border-color: var(--amber); animation: blink 1s infinite; }
+  #pill.err { color: var(--red); border-color: var(--red); }
+  @keyframes blink { 50% { opacity: .45; } }
+
+  /* ctx meter */
+  #ctx-box { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  #ctx-label { font-size: 9px; color: var(--text-dim); letter-spacing: 0.06em; white-space: nowrap; }
+  #ctx-bar {
+    width: 120px; height: 6px; background: var(--surface2);
+    border: 1px solid var(--border); overflow: hidden;
+  }
+  #ctx-fill { height: 100%; width: 0%; background: var(--green); box-shadow: 0 0 6px var(--green-glow); transition: width .3s; }
+  #ctx-fill.warn { background: var(--amber); box-shadow: 0 0 6px rgba(255,179,0,.4); }
+  #ctx-fill.crit { background: var(--red); box-shadow: 0 0 6px rgba(255,31,75,.4); }
+
+  .tbtn {
+    background: transparent; border: 1px solid var(--border);
+    color: var(--text-dim); cursor: pointer; font-size: 13px;
+    padding: 5px 9px; transition: all .15s; letter-spacing: 0.05em;
+  }
+  .tbtn:hover { color: var(--green); border-color: var(--border-bright); text-shadow: 0 0 8px var(--green-glow); }
+  .tbtn.busy { color: var(--amber); border-color: var(--amber); pointer-events: none; }
+
+  /* ── hamburger button (solo mobile; nascosto su desktop) ── */
+  #menu-btn {
+    display: none; align-items: center; justify-content: center;
+    background: transparent; border: 1px solid var(--border);
+    color: var(--green); cursor: pointer;
+    min-width: 40px; min-height: 36px; flex-shrink: 0;
+    transition: background .15s, color .15s;
+  }
+  #menu-btn:active { background: var(--green); color: #000; }
+
+  /* sidebar backdrop (tap-outside-to-close) */
+  #sidebar-backdrop {
+    position: fixed; inset: 0; background: rgba(0,0,0,.55);
+    z-index: 590; opacity: 0; transition: opacity .2s;
+    pointer-events: none;
+  }
+  #sidebar-backdrop.open { opacity: 1; pointer-events: auto; }
+
+  /* safe-area top padding (notch/status bar) */
+  #topbar { padding-top: env(safe-area-inset-top, 0px); }
+  /* sidebar safe-area (iOS left inset + bottom) */
+  #sidebar {
+    padding: env(safe-area-inset-left, 0px) 0 env(safe-area-inset-bottom, 0px) 0;
+  }
+
+  /* prevent iOS zoom on input focus (inputs < 16px trigger zoom on iOS Safari) */
+  #input, #sp-text { font-size: 16px; }
+
+  #model-select {
+    background: var(--surface2); color: var(--green);
+    border: 1px solid var(--border-bright);
+    padding: 7px 10px; font-size: 11px; max-width: 260px;
+    letter-spacing: 0.04em; cursor: pointer;
+  }
+  #model-select:focus { outline: none; box-shadow: 0 0 8px var(--green-glow); }
+  #model-select option { background: var(--surface); color: var(--text); }
+
+  /* ── messages ─────────────────────── */
+  #messages { flex: 1; overflow-y: auto; padding: 22px 0; }
+  #messages .inner { max-width: 860px; margin: 0 auto; padding: 0 20px; }
+  .row { display: flex; flex-direction: column; margin-bottom: 14px; gap: 6px; }
+  .row.user { align-items: flex-end; }
+  .row.assistant { align-items: flex-start; }
+  .bubble {
+    max-width: 78%; padding: 10px 14px; margin: 0 21px;
+    white-space: pre-wrap; word-break: break-word;
+    line-height: 1.55; font-size: 13px;
+    border: 1px solid var(--border);
+  }
+  .row.user .bubble {
+    background: var(--user-bubble); color: var(--green);
+    border-color: var(--border-bright);
+    box-shadow: 0 0 10px rgba(0,255,65,0.06);
+  }
+  .row.system .bubble {
+    max-width: calc(100% - 42px); background: transparent; border-style: dashed;
+    color: var(--text-dim); font-size: 11px; padding: 6px 12px;
+    text-align: center; letter-spacing: 0.02em;
+  }
+  .row.assistant .bubble { background: var(--bot-bubble); color: var(--text); }
+
+  /* ── markdown renderizzato dentro i bubble ─────────────── */
+  .bubble.md { white-space: normal; }
+  .bubble.md > *:first-child { margin-top: 0; }
+  .bubble.md > *:last-child { margin-bottom: 0; }
+  .bubble.md p { margin: 0 0 8px; }
+  .bubble.md h1, .bubble.md h2, .bubble.md h3, .bubble.md h4 {
+    color: var(--green); font-weight: 700; letter-spacing: 0.06em;
+    margin: 12px 0 6px; line-height: 1.35;
+  }
+  .bubble.md h1 { font-size: 16px; text-shadow: 0 0 8px var(--green-glow); }
+  .bubble.md h2 { font-size: 14px; }
+  .bubble.md h3 { font-size: 13px; }
+  .bubble.md h4 { font-size: 12px; color: var(--text); }
+  .bubble.md strong { color: var(--green); font-weight: 700; }
+  .bubble.md em { color: var(--text); font-style: italic; }
+  .bubble.md del { color: var(--text-dim); }
+  .bubble.md a {
+    color: var(--cyan); text-decoration: none;
+    border-bottom: 1px dotted rgba(0,212,255,.5);
+  }
+  .bubble.md a:hover { text-shadow: 0 0 6px rgba(0,212,255,.6); }
+  .bubble.md code {
+    font-family: inherit; font-size: 12px; color: var(--green);
+    background: rgba(0,255,65,.08); border: 1px solid var(--border);
+    padding: 1px 5px;
+  }
+  .bubble.md pre {
+    background: #000600; border: 1px solid var(--border);
+    padding: 10px 12px; margin: 8px 0; overflow-x: auto;
+    position: relative;
+  }
+  .bubble.md pre code {
+    background: none; border: none; padding: 0;
+    color: #baffba; font-size: 12px; line-height: 1.5;
+  }
+  .bubble.md pre[data-lang]::before {
+    content: attr(data-lang); position: absolute; top: 0; right: 0;
+    font-size: 8px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--text-dim); background: var(--surface2);
+    border-left: 1px solid var(--border); border-bottom: 1px solid var(--border);
+    padding: 2px 6px;
+  }
+  .bubble.md ul, .bubble.md ol { margin: 6px 0 8px; padding-left: 22px; }
+  .bubble.md li { margin: 3px 0; }
+  .bubble.md ul li::marker { color: var(--green); }
+  .bubble.md ol li::marker { color: var(--green-dim); font-size: 11px; }
+  .bubble.md blockquote {
+    border-left: 2px solid var(--green-dim); margin: 8px 0;
+    padding: 2px 0 2px 11px; color: var(--text-dim); font-style: italic;
+  }
+  .bubble.md table {
+    border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 12px;
+    display: block; overflow-x: auto;
+  }
+  .bubble.md th, .bubble.md td {
+    border: 1px solid var(--border); padding: 4px 9px; text-align: left;
+  }
+  .bubble.md th {
+    background: var(--surface2); color: var(--green);
+    font-weight: 600; letter-spacing: 0.05em; white-space: nowrap;
+  }
+  .bubble.md tr:nth-child(even) td { background: rgba(0,255,65,.025); }
+  .bubble.md hr {
+    border: none; border-top: 1px solid var(--border);
+    margin: 12px 0; background: linear-gradient(90deg, transparent, var(--green-dim), transparent);
+    height: 1px;
+  }
+  .reasoning {
+    max-width: 78%; margin-bottom: 6px; margin-left: 21px; padding: 0 10px;
+    font-size: 10.5px; color: var(--purple);
+    background: rgba(176,96,255,0.05);
+    border: 1px dashed rgba(176,96,255,0.35);
+    white-space: pre-wrap; word-break: break-word; cursor: pointer;
+    opacity: .85; transition: opacity .15s;
+  }
+  .reasoning:hover { opacity: 1; }
+  .reasoning.closed {
+    max-height: 1.5em; overflow: hidden; text-overflow: ellipsis;
+    white-space: nowrap; opacity: .55;
+  }
+  /* skeleton "stato avanzamento" — appare al send, sparisce al primo token */
+  .msg-actions { display: flex; gap: 4px; margin: 2px 0 8px 21px; }
+  .row.user .msg-actions { justify-content: flex-end; margin-right: 8px; margin-left: 0; }
+  .abtn {
+    background: none; border: 1px solid transparent; border-radius: 5px;
+    color: var(--text-dim); font-size: 11px; padding: 3px 8px; cursor: pointer;
+    font-family: inherit; transition: color .12s, border-color .12s;
+  }
+  .abtn:hover { color: var(--green); border-color: var(--border); }
+  .abtn.primary { color: var(--green); border-color: var(--border); }
+  .tps-chip {
+    font-size: 10px; color: var(--text-dim); opacity: .75;
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 1px 8px; margin-right: 6px; white-space: nowrap;
+    align-self: center; letter-spacing: .2px;
+  }
+  .edit-area {
+    width: 100%; min-height: 4.5em; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; padding: 8px;
+    font: inherit; resize: vertical; margin-bottom: 6px;
+  }
+  .thinking-skel {
+    max-width: 78%; margin-bottom: 6px; margin-left: 21px;
+    padding: 10px 14px;
+    border: 1px dashed rgba(176,96,255,0.45);
+    background: rgba(176,96,255,0.04);
+    border-radius: 8px;
+  }
+  .skel-status { font-size: 11px; color: var(--purple); letter-spacing: 0.03em; }
+  .skel-status.tick { animation: skelTick 0.4s ease; }
+  @keyframes skelTick { 0% { opacity: 0.15; } 100% { opacity: 1; } }
+  .skel-bar {
+    margin-top: 8px; height: 4px; width: 62%; border-radius: 2px;
+    background: linear-gradient(90deg, transparent, rgba(176,96,255,0.6), transparent);
+    background-size: 200% 100%;
+    animation: skelSlide 1.2s linear infinite;
+  }
+  @keyframes skelSlide { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+  .typing { display: inline-block; animation: blink 1s infinite; color: var(--green); }
+  #empty {
+    height: 100%; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; color: var(--text-dim); gap: 12px;
+  }
+  #empty .logo-big {
+    font-size: 26px; font-weight: 700; letter-spacing: 0.2em;
+    color: var(--green); text-shadow: 0 0 14px var(--green-glow);
+    animation: flicker 4s infinite;
+  }
+  #empty .sub { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; }
+  #empty .hint { font-size: 10px; color: var(--text-dim); opacity: .7; }
+
+  /* ── composer ─────────────────────── */
+  #composer {
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+    padding: 12px 18px 14px;
+  }
+  #composer .inner { max-width: 860px; margin: 0 auto; }
+  #file-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 7px;
+    background: var(--surface2); border: 1px solid var(--border-bright);
+    padding: 4px 9px; font-size: 10px; color: var(--text);
+    letter-spacing: 0.04em;
+  }
+  .chip .nm { color: var(--cyan); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chip .sz { color: var(--text-dim); font-size: 9px; }
+  .chip .rm { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 12px; padding: 0 2px; }
+  .chip .rm:hover { color: var(--red); text-shadow: 0 0 6px var(--red); }
+  .input-row { display: flex; gap: 8px; align-items: flex-end; }
+  #attach-btn {
+    background: transparent; border: 1px solid var(--border);
+    color: var(--text-dim); cursor: pointer; font-size: 15px;
+    padding: 9px 12px; transition: all .15s; flex-shrink: 0;
+  }
+  #attach-btn:hover { color: var(--cyan); border-color: var(--cyan); text-shadow: 0 0 8px rgba(0,212,255,.4); }
+  #input {
+    flex: 1; resize: none; background: var(--surface2);
+    color: var(--text); border: 1px solid var(--border);
+    padding: 10px 12px; font-size: 13px; line-height: 1.5;
+    max-height: 180px; min-height: 42px;
+  }
+  #input:focus { outline: none; border-color: var(--border-bright); box-shadow: 0 0 8px var(--green-glow); }
+  #input::placeholder { color: var(--text-dim); }
+  #send, #stop {    border: 1px solid var(--border-bright); cursor: pointer;
+    padding: 10px 18px; font-size: 11px; font-weight: 600;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    transition: all .15s; flex-shrink: 0;
+  }
+  #send { background: transparent; color: var(--green); }
+  #send:hover:not(:disabled) { background: var(--green); color: #000; box-shadow: 0 0 14px var(--green-glow); }
+  #send:disabled { opacity: .3; cursor: default; }
+  #mic {
+    border: 1px solid var(--border-bright); background: transparent;
+    color: var(--text); cursor: pointer; padding: 10px 14px; font-size: 15px;
+    transition: all .15s; flex-shrink: 0; border-radius: 6px;
+  }
+  #mic:hover:not(:disabled) { background: var(--green); color: #000; box-shadow: 0 0 14px var(--green-glow); }
+  #mic.rec {
+    background: var(--red); color: #fff; border-color: var(--red);
+    font-size: 11px; font-weight: 700; letter-spacing: .06em;
+    animation: micPulse 1s ease-in-out infinite;
+  }
+  #mic.play { background: var(--green); color: #000; border-color: var(--green); }
+  @keyframes micPulse { 50% { box-shadow: 0 0 16px var(--red); } }
+  #stop { background: transparent; color: var(--red); border-color: var(--red); display: none; }
+  #stop:hover { background: var(--red); color: #000; }
+  .composer-hint { margin-top: 6px; font-size: 9px; color: var(--text-dim); letter-spacing: 0.06em; opacity: .7; }
+
+  /* ── system prompt modal ─────────────── */
+  #overlay {
+    position: fixed; inset: 0; background: rgba(0,5,0,0.78);
+    display: none; align-items: center; justify-content: center; z-index: 590;
+    backdrop-filter: blur(2px);
+  }
+  #overlay.open { display: flex; }
+  /* il modal è figlio di <body> (sibling dell'overlay): senza position:fixed
+     diventava un flex-item del body e sfondava il layout */
+  #sp-modal {
+    position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    z-index: 1000;
+    width: min(640px, 92vw); max-height: 86vh; overflow: auto;
+    background: var(--surface);
+    border: 1px solid var(--border-bright);
+    box-shadow: 0 0 30px var(--green-glow), 0 0 60px rgba(0,255,65,0.05);
+    padding: 20px 22px; display: none;
+  }
+  #sp-modal.open, #overlay.open + #sp-modal { display: block; animation: modalIn .18s ease-out; }
+  @keyframes modalIn { from { transform: translateY(8px) scale(.98); opacity: 0; } to { transform: none; opacity: 1; } }
+  #sp-modal h3 {
+    font-size: 11px; color: var(--green); letter-spacing: 0.14em;
+    text-transform: uppercase; margin-bottom: 4px;
+    text-shadow: 0 0 8px var(--green-glow);
+  }
+  #sp-modal .desc { font-size: 10px; color: var(--text-dim); margin-bottom: 12px; letter-spacing: 0.04em; }
+  #sp-modal .sp-row { display: flex; gap: 8px; margin-bottom: 8px; }
+  #sp-active {
+    flex: 1 1 auto; min-width: 0;
+    background: var(--surface2); color: var(--green);
+    border: 1px solid var(--border); padding: 7px 10px; font-size: 11px;
+    text-transform: uppercase; letter-spacing: 0.06em; cursor: pointer;
+  }
+  #sp-active.active-custom { color: var(--amber); border-color: var(--amber); }
+  #sp-name {
+    width: 100%; margin-bottom: 8px;
+    background: var(--surface2); color: var(--text);
+    border: 1px solid var(--border-bright); padding: 7px 10px; font-size: 12px;
+  }
+  .sp-mini {
+    background: transparent; color: var(--green-dim);
+    border: 1px solid var(--border-bright); padding: 7px 10px;
+    font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em;
+    cursor: pointer; flex: 0 0 auto;
+  }
+  .sp-mini:hover { color: var(--green); border-color: var(--border-bright); }
+  .sp-mini.danger:hover { color: var(--red); border-color: var(--red); }
+  #sp-text {
+    width: 100%; min-height: 160px; resize: vertical;
+    background: var(--surface2); color: var(--text);
+    border: 1px solid var(--border); padding: 10px 12px;
+    font-size: 12px; line-height: 1.55;
+  }
+  #sp-text:focus { outline: none; border-color: var(--border-bright); box-shadow: 0 0 8px var(--green-glow); }
+  .sp-foot { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+  .sp-foot .spacer { flex: 1; }
+  #sp-status { font-size: 10px; color: var(--green); letter-spacing: 0.06em; min-height: 1em; }
+  #sp-save, #sp-cancel {
+    padding: 8px 16px; font-size: 10px; font-weight: 600;
+    letter-spacing: 0.12em; text-transform: uppercase; cursor: pointer;
+    border: 1px solid var(--border-bright); transition: all .15s;
+  }
+  #sp-save { background: transparent; color: var(--green); }
+  #sp-save:hover { background: var(--green); color: #000; box-shadow: 0 0 12px var(--green-glow); }
+  #sp-cancel { background: transparent; color: var(--text-dim); border-color: var(--border); }
+  #sp-cancel:hover { color: var(--text); border-color: var(--border-bright); }
+
+  /* ── responsive (mobile touch) ─────────────────── */
+  @media (max-width: 720px) {
+    /* sidebar off-canvas + show hamburger */
+    #menu-btn { display: flex; min-width: 44px; min-height: 44px; }
+    #sidebar {
+      position: fixed; left: 0; top: 0; bottom: 0; z-index: 595;
+      width: 280px; min-width: 280px;
+      transform: translateX(-100%);
+      transition: transform .25s cubic-bezier(.4,0,.2,1);
+      box-shadow: 0 0 30px rgba(0,0,0,.9);
+    }
+    #sidebar.open { transform: none; }
+
+    /* ctx-meter already hidden by existing rule; compact topbar */
+    #ctx-box { display: none; }
+    /* la topbar è una riga sola: gli elementi si comprimono invece di andare a capo
+       (con flex-wrap il select modello finiva sotto #messages, non cliccabile) */
+    #topbar { gap: 8px; padding: 0 10px; }
+    #model-select {
+      flex: 1 1 auto; min-width: 0; max-width: none;
+      font-size: 12px; padding: 6px 8px; text-overflow: ellipsis;
+    }
+    #pill {
+      font-size: 8px; padding: 4px 6px; min-width: 0; max-width: 90px;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    #compress-btn, #sysprompt-btn { font-size: 14px; padding: 6px 8px; flex: 0 0 auto; }
+    /* con la tastiera aperta il footer informativo ruba spazio alla composer */
+    body.kb-open .composer-hint { display: none; }
+
+    /* bubble / reasoning full-width on narrow screens */
+    .bubble, .reasoning, .thinking-skel { max-width: 96%; }
+    .bubble { margin: 0 8px; }
+    .reasoning, .thinking-skel { margin-left: 8px; max-width: 96%; }
+    .row.system .bubble { max-width: calc(100% - 16px); margin: 0 8px; }
+
+    /* composer: touch-friendly, safe-area */
+    #composer { padding: 8px 10px env(safe-area-inset-bottom, 8px); }
+    #composer .inner { padding-right: 4px; }
+    #attach-btn { min-height: 44px; min-width: 44px; font-size: 18px; }
+    #input { min-height: 44px; padding: 10px 12px; max-height: 140px; }
+    #send, #stop { min-height: 44px; min-width: 44px; padding: 8px 14px; font-size: 12px; }
+
+    /* prevent composer from being covered by on-screen keyboard:
+       #messages gets scrollable space above composer; iOS handles rest via safe-area */
+    #messages { padding: 16px 0; }
+    .row { margin-bottom: 10px; }
+  }
+</style>
+</head>
+<body>
+  <!-- sidebar backdrop (tap-outside-to-close) -->
+  <div id="sidebar-backdrop"></div>
+
+  <aside id="sidebar">
+    <div class="side-head">
+      <span class="logo">DOMUS<span style="color:var(--text);">/</span>CHAT</span>
+      <span class="ver">v3</span>
+    </div>
+    <button id="new-chat">+ Nuova chat</button>
+    <div id="conv-list"></div>
+    <div class="side-foot"><span>MAIOR DOMUS</span><span id="foot-model">—</span></div>
+  </aside>
+
+  <main id="main">
+    <header id="topbar">
+      <button id="menu-btn" class="nm" title="Menu">
+        <svg id="menu-icon-open" width="20" height="14" viewBox="0 0 20 14"><line x1="1" y1="2" x2="19" y2="2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="1" y1="7" x2="19" y2="7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="1" y1="12" x2="19" y2="12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        <svg id="menu-icon-close" width="20" height="14" viewBox="0 0 20 14" style="display:none"><line x1="2" y1="2" x2="18" y2="12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="18" y1="2" x2="2" y2="12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      </button>
+      <span id="pill">inizializzo…</span>
+      <button id="share-btn" title="Copia link di sola lettura di questa chat" style="display:none">🔗</button>
+      <button id="key-btn" title="Chiave di sessione — stesso token su più dispositivi">🔑</button>
+      <div id="ctx-box" title="Contesto usato / finestra del modello">
+        <span id="ctx-label">—</span>
+        <div id="ctx-bar"><div id="ctx-fill"></div></div>
+      </div>
+      <button class="tbtn" id="compress-btn" title="Comprimi la conversazione (riassunto dei messaggi vecchi)">⊟</button>
+      <button class="tbtn" id="sysprompt-btn" title="System prompt globale">⚙</button>
+      <select id="model-select"></select>
+    </header>
+
+    <section id="messages">
+      <div class="inner" id="msg-inner">
+        <div id="empty">
+          <div class="logo-big">DOMUS//CHAT</div>
+          <div class="sub">Maior Domus — terminale conversazionale</div>
+          <div class="hint">seleziona un modello · allega file temporanei con 📎 · invia con Ctrl+Enter</div>
+        </div>
+      </div>
+    </section>
+
+    <footer id="composer">
+      <div class="inner">
+        <div id="file-chips"></div>
+        <div class="input-row">
+          <button id="attach-btn" title="Allega file di testo temporaneo (non salvato)">📎</button>
+          <input type="file" id="file-input" multiple hidden>
+          <textarea id="input" rows="1" placeholder="Scrivi un messaggio…"></textarea>
+          <button id="mic" title="Parla (trascrive e invia, risposta letta ad alta voce)">🎤</button>
+          <button id="send">Invia</button>
+          <button id="stop">Stop</button>
+        </div>
+        <div class="composer-hint">I file allegati vivono solo in RAM (6h) e vengono iniettati nel prompt finché il chip è attivo.</div>
+      </div>
+    </footer>
+  </main>
+
+  <div id="overlay"></div>
+  <div id="sp-modal">
+    <h3>⚙ System prompt</h3>
+    <div class="desc">La libreria dei system prompt. Il profilo attivo viene iniettato in ogni conversazione e salvato automaticamente.</div>
+    <div class="sp-row">
+      <select id="sp-active"><option value="">— personalizzato (non salvato) —</option></select>
+      <button id="sp-new" class="sp-mini" title="Nuovo prompt">＋ nuovo</button>
+    </div>
+    <input id="sp-name" placeholder="Nome del prompt (es. Work, Casa)" style="display:none">
+    <textarea id="sp-text" placeholder="Es: Sei un assistente conciso. Rispondi sempre in italiano."></textarea>
+    <div class="sp-foot">
+      <span id="sp-status"></span>
+      <span class="spacer"></span>
+      <button id="sp-del" class="sp-mini danger" title="Elimina il prompt attivo">elimina</button>
+      <button id="sp-cancel">Chiudi</button>
+      <button id="sp-save">Salva e attiva</button>
+    </div>
+  </div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+let MODELS = [];
+let convId = null;
+let readOnly = false;   // chat aperta via link e non della sessione
+let streaming = false;
+let abortCtl = null;
+let attached = [];   // temp files: {id, name, tokens_est}
+
+/* ── models ─────────────────────────────── */
+async function loadModels() {
+  try {
+    const r = await fetch("/api/models");
+    const data = await r.json();
+    if (!Array.isArray(data)) throw new Error(data.error || "bad response");
+    MODELS = data;
+    const sel = $("model-select");
+    sel.innerHTML = "";
+    const last = localStorage.getItem("dc_model");
+    for (const m of MODELS) {
+      const o = document.createElement("option");
+      o.value = m.id;
+      o.textContent = (m.label || m.id) + (m.loaded ? " ●" : "");
+      if (m.id === last) o.selected = true;
+      sel.appendChild(o);
+    }
+    if (!sel.value && MODELS.length) sel.value = MODELS[0].id;
+    updatePill();
+    refreshUsage();
+  } catch (e) {
+    setPill("backend offline", "err");
+  }
+}
+
+function currentModel() { return $("model-select").value || ""; }
+function currentCtx() {
+  const m = MODELS.find((x) => x.id === currentModel());
+  return (m && m.ctx) || 131072;
+}
+
+function updatePill() {
+  const m = MODELS.find((x) => x.id === currentModel());
+  if (!m) { setPill("nessun modello", "err"); return; }
+  setPill(m.loaded ? "caricato" : (m.available ? "pronto (load on demand)" : "non disponibile"),
+          m.loaded ? "ok" : (m.available ? "" : "err"));
+}
+
+function setPill(text, cls) {
+  const p = $("pill");
+  p.textContent = text;
+  p.className = cls || "";
+}
+
+/* ── ctx meter ─────────────────────────────── */
+let usageTimer = null;
+function refreshUsage() {
+  clearTimeout(usageTimer);
+  usageTimer = setTimeout(async () => {
+    try {
+      const r = await fetch(`/api/usage?conv_id=${convId || 0}&model=${encodeURIComponent(currentModel())}`);
+      const u = await r.json();
+      renderCtx(u);
+    } catch (e) { /* ignore */ }
+  }, 120);
+}
+
+function renderCtx(u) {
+  const fill = $("ctx-fill");
+  const label = $("ctx-label");
+  const pct = u.pct || 0;
+  fill.style.width = Math.min(100, pct) + "%";
+  fill.className = pct > 92 ? "crit" : (pct > 75 ? "warn" : "");
+  const fmt = (n) => n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + "k" : String(n);
+  label.textContent = `${fmt(u.used)} / ${fmt(u.ctx)} tok (${pct.toFixed(0)}%)`;
+  label.title = `Contesto: ${u.used} token usati su ${u.ctx} (system prompt + storia visibile). Oltre ~${Math.round(u.ctx * 0.9)} scatta la compressione automatica.`;
+}
+
+/* ── conversations ─────────────────────────────── */
+async function ensureSession() {
+  // bootstrap sessione: token locale riusato (X-Session), altrimenti nuovo
+  // cookie dc_session 30g + salvataggio in localStorage per l'export
+  const have = localStorage.getItem("dc_session") || "";
+  try {
+    const r = await fetch("/api/session", { headers: have ? { "X-Session": have } : {} });
+    const d = await r.json();
+    if (d.token) localStorage.setItem("dc_session", d.token);
+  } catch (e) { /* cookie-only mode, nothing to do */ }
+}
+
+/* ── chiave di sessione: stesso token su più dispositivi ─── */
+function sessionKeyUI() {
+  const tok = localStorage.getItem("dc_session") || "(nessuna — ricarica la pagina)";
+  const choice = prompt(
+    "CHIAVE DI SESSIONE\n\n" +
+    "La stessa chiave = le stesse chat su tutti i dispositivi.\n" +
+    "• Su questo dispositivo la chiave è:\n" + tok + "\n\n" +
+    "Cosa vuoi fare?\n" +
+    "  [Invio] = copia questa chiave (poi incollala sugli altri dispositivi)\n" +
+    "  [digita] = imposta una chiave ricevuta da un altro dispositivo",
+    "");
+  if (choice === null) return;                    // annullato
+  const val = choice.trim();
+  if (!val) {
+    if (navigator.clipboard && navigator.clipboard.writeText)
+      navigator.clipboard.writeText(tok).then(() => alert("Chiave copiata."));
+    else prompt("Copia manualmente:", tok);
+    return;
+  }
+  localStorage.setItem("dc_session", val);
+  // verifica immediata col backend
+  fetch("/api/session", { headers: { "X-Session": val } })
+    .then((r) => r.json())
+    .then((d) => {
+      if (d && d.token && !d.new) { localStorage.setItem("dc_session", d.token); alert("Chiave valida — chat sincronizzate."); location.reload(); }
+      else { localStorage.removeItem("dc_session"); alert("Chiave NON riconosciuta: torno alla sessione precedente."); location.reload(); }
+    })
+    .catch(() => alert("Verifica fallita, riprova."));
+}
+async function loadConvs(activeId) {
+  try {
+    const r = await fetch("/api/conversations");
+    if (r.status === 401) { await ensureSession(); return loadConvs(activeId); }
+    const convs = await r.json();
+    const list = $("conv-list");
+    list.innerHTML = "";
+    for (const c of convs) {
+      const el = document.createElement("div");
+      el.className = "conv" + (c.id === activeId ? " active" : "");
+      const t = document.createElement("span");
+      t.className = "title";
+      t.textContent = c.title || ("chat #" + c.id);
+      const rn = document.createElement("button");
+      rn.className = "ren";
+      rn.textContent = "✎";
+      rn.title = "Rinomina";
+      rn.addEventListener("click", (ev) => { ev.stopPropagation(); renameConv(el, t, c); });
+      const d = document.createElement("button");
+      d.className = "del";
+      d.textContent = "✕";
+      d.title = "Elimina conversazione";
+      d.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        if (!confirm("Eliminare questa conversazione?")) return;
+        await fetch("/api/conversations/" + c.id, { method: "DELETE" });
+        if (convId === c.id) { convId = null; $("messages").innerHTML = ""; showEmpty(); }
+        loadConvs(convId);
+        refreshUsage();
+      });
+      el.appendChild(t);
+      el.appendChild(rn);
+      el.appendChild(d);
+      el.addEventListener("click", () => { closeDrawer(); openConv(c.id); });
+      list.appendChild(el);
+    }
+  } catch (e) { /* ignore */ }
+}
+
+function renameConv(el, t, c) {
+  if (el.querySelector(".rename-input")) return;
+  const inp = document.createElement("input");
+  inp.className = "rename-input";
+  inp.value = t.textContent;
+  inp.maxLength = 80;
+  t.style.display = "none";
+  el.insertBefore(inp, t);
+  inp.focus();
+  inp.select();
+  const commit = async () => {
+    const val = inp.value.trim();
+    inp.remove();
+    t.style.display = "";
+    if (!val || val === t.textContent) return;
+    const r = await fetch("/api/conversations/" + c.id, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: val }),
+    });
+    if (r.ok) { t.textContent = val; c.title = val; }
+  };
+  inp.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") commit();
+    if (e.key === "Escape") { inp.remove(); t.style.display = ""; }
+  });
+  inp.addEventListener("blur", commit);
+}
+
+function showEmpty() {
+  $("messages").innerHTML = '<div id="empty">Seleziona un modello e inizia a scrivere.</div>';
+}
+
+async function openConv(id, fromLink) {
+  convId = id;
+  const r = await fetch("/api/conversations/" + id + "/messages");
+  if (!r.ok) { showEmpty(); return; }
+  const msgs = await r.json();
+  renderMessages(msgs);
+  loadConvs(id);
+  refreshUsage();
+  // sola-lettura se il link punta a una chat non della sessione
+  readOnly = !!fromLink && !(await ownsConv(id));
+  applyReadOnly();
+  // URL parlante: ?conv=id sopravvive al refresh del browser
+  try { history.replaceState(null, "", location.pathname + "?conv=" + id); } catch (e) {}
+}
+
+async function ownsConv(id) {
+  try {
+    const r = await fetch("/api/conversations");
+    if (!r.ok) return false;
+    return (await r.json()).some((c) => c.id === id);
+  } catch (e) { return false; }
+}
+
+function applyReadOnly() {
+  const dis = readOnly;
+  $("input").disabled = dis;
+  $("send").disabled = dis;
+  $("attach-btn").disabled = dis;
+  $("share-btn").style.display = convId && !dis ? "" : "none";
+  if (dis) setPill("sola lettura", "");
+  refreshSend();
+}
+
+function newChat() {
+  convId = null;
+  readOnly = false;
+  showEmpty();
+  applyReadOnly();
+  loadConvs(null);
+  refreshUsage();
+  $("input").focus();
+}
+
+function renderMessages(msgs) {
+  const box = $("messages");
+  box.innerHTML = "";
+  for (const m of msgs) addBubble(m.role, m.content, m.reasoning, m.id, m.stats);
+  box.scrollTop = box.scrollHeight;
+}
+
+/* ── markdown (zero dipendenze, XSS-safe) ─────────────────── */
+function mdEscape(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function safeUrl(u) {
+  const s = String(u || "").replace(/[\s\u0000-\u001f]/g, "");
+  if (/^(javascript|data|vbscript|file):/i.test(s)) return "#";
+  return mdEscape(s);
+}
+function mdInline(s) {
+  const codes = [];
+  // estrae le code span prima di ogni altra trasformazione
+  let out = String(s).replace(/`([^`\n]+)`/g, (_, c) => {
+    codes.push(c);
+    return "\u0000" + (codes.length - 1) + "\u0000";
+  });
+  out = mdEscape(out);
+  // immagini
+  out = out.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+&quot;[^&]*&quot;)?\)/g,
+    (_, alt, url) => '<img src="' + safeUrl(url) + '" alt="' + alt + '" style="max-width:100%">');
+  // link [txt](url)
+  out = out.replace(/\[([^\]]+)\]\(([^)\s]+)(?:\s+&quot;[^&]*&quot;)?\)/g,
+    (_, txt, url) => '<a href="' + safeUrl(url) + '" target="_blank" rel="noopener noreferrer">' + txt + '</a>');
+  // autolink <url> e URL nudi
+  out = out.replace(/&lt;(https?:\/\/[^\s&]+)&gt;/g, '<a href="$1" target="_blank" rel="noopener noreferrer">$1</a>');
+  out = out.replace(/(^|[\s(>])(https?:\/\/[^\s<")]+)(?![^<]*<\/a>)/g,
+    '$1<a href="$2" target="_blank" rel="noopener noreferrer">$2</a>');
+  // enfasi
+  out = out.replace(/\*\*\*([^*]+)\*\*\*/g, "<strong><em>$1</em></strong>");
+  out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  out = out.replace(/(^|[^\w])__([^_]+)__(?![\w])/g, "$1<strong>$2</strong>");
+  out = out.replace(/(^|[^*\w])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
+  out = out.replace(/(^|[^\w])_([^_\n]+)_(?![\w])/g, "$1<em>$2</em>");
+  out = out.replace(/~~([^~\n]+)~~/g, "<del>$1</del>");
+  // ripristina le code span
+  out = out.replace(/\u0000(\d+)\u0000/g, (_, n) => "<code>" + mdEscape(codes[+n]) + "</code>");
+  return out;
+}
+function mdBlocks(text) {
+  const lines = String(text).replace(/\r\n?/g, "\n").split("\n");
+  let html = "", i = 0;
+  const isFence = (l, ch) => new RegExp("^\\s*" + ch + "{3,}\\s*$").test(l);
+  while (i < lines.length) {
+    const line = lines[i];
+    const fence = line.match(/^\s*(`{3,}|~{3,})\s*([\w+#.-]*)\s*$/);
+    if (fence) {
+      const ch = fence[1][0] === "`" ? "`" : "~", lang = fence[2], buf = [];
+      i++;
+      while (i < lines.length && !isFence(lines[i], ch)) { buf.push(lines[i]); i++; }
+      i++;
+      html += "<pre" + (lang ? ' data-lang="' + mdEscape(lang) + '"' : "") + "><code>" + mdEscape(buf.join("\n")) + "</code></pre>";
+      continue;
+    }
+    if (/^\s*$/.test(line)) { i++; continue; }
+    if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) { html += "<hr>"; i++; continue; }
+    const h = line.match(/^\s*(#{1,4})\s+(.*?)\s*#*\s*$/);
+    if (h) { const n = h[1].length; html += "<h" + n + ">" + mdInline(h[2]) + "</h" + n + ">"; i++; continue; }
+    if (/^\s*>/.test(line)) {
+      const buf = [];
+      while (i < lines.length && /^\s*>/.test(lines[i])) { buf.push(lines[i].replace(/^\s*>\s?/, "")); i++; }
+      html += "<blockquote>" + mdBlocks(buf.join("\n")) + "</blockquote>";
+      continue;
+    }
+    const rowRe = /^\s*\|?(.+?)\|?\s*$/;
+    const sepRe = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+    if (line.includes("|") && i + 1 < lines.length && sepRe.test(lines[i + 1]) && rowRe.test(line)) {
+      const cells = (r) => r.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+      const head = cells(line);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && lines[i].includes("|") && !/^\s*$/.test(lines[i])) { rows.push(cells(lines[i])); i++; }
+      html += "<table><thead><tr>" + head.map((c) => "<th>" + mdInline(c) + "</th>").join("") + "</tr></thead><tbody>";
+      html += rows.map((r) => "<tr>" + head.map((_, k) => "<td>" + mdInline(r[k] || "") + "</td>").join("") + "</tr>").join("");
+      html += "</tbody></table>";
+      continue;
+    }
+    if (/^\s*([-*+]|\d+[.)])\s+/.test(line)) {
+      const ordered = /^\s*\d+[.)]\s+/.test(line);
+      const items = [];
+      while (i < lines.length && /^\s*([-*+]|\d+[.)])\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*([-*+]|\d+[.)])\s+/, ""));
+        i++;
+        while (i < lines.length && /^\s{2,}\S/.test(lines[i]) && !/^\s*([-*+]|\d+[.)])\s+/.test(lines[i])) {
+          items[items.length - 1] += " " + lines[i].trim();
+          i++;
+        }
+      }
+      html += (ordered ? "<ol>" : "<ul>") + items.map((it) => "<li>" + mdInline(it) + "</li>").join("") + (ordered ? "</ol>" : "</ul>");
+      continue;
+    }
+    const buf = [];
+    while (i < lines.length && !/^\s*$/.test(lines[i]) && !/^\s*(`{3,}|~{3,})/.test(lines[i]) &&
+           !/^\s*#{1,4}\s/.test(lines[i]) && !/^\s*>/.test(lines[i]) &&
+           !/^\s*([-*+]|\d+[.)])\s+/.test(lines[i]) && !/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(lines[i])) {
+      buf.push(lines[i]); i++;
+    }
+    if (buf.length) html += "<p>" + mdInline(buf.join("\n")).replace(/\n/g, "<br>") + "</p>";
+    else i++;
+  }
+  return html;
+}
+function renderMarkdown(el, src) {
+  el.dataset.md = src;
+  el.innerHTML = mdBlocks(src == null ? "" : src);
+}
+let mdRaf = 0, mdPending = null;
+function scheduleMd(el, text) {
+  mdPending = { el: el, text: text };
+  if (mdRaf) return;
+  mdRaf = requestAnimationFrame(() => {
+    mdRaf = 0;
+    if (!mdPending) return;
+    renderMarkdown(mdPending.el, mdPending.text);
+    mdPending = null;
+    scrollToBottom();
+  });
+}
+function scrollToBottom() {
+  const m = $("messages");
+  m.scrollTop = m.scrollHeight;
+}
+
+function addBubble(role, text, reasoning, msgId, stats) {
+  const box = $("messages");
+  const row = document.createElement("div");
+  row.className = "row " + role;
+  if (reasoning) {
+    const r = document.createElement("div");
+    r.className = "reasoning closed";
+    r.dataset.txt = reasoning;
+    r.textContent = "💭 " + reasoning;
+    r.title = "Clicca per espandere/collassare";
+    r.addEventListener("click", () => r.classList.toggle("closed"));
+    row.appendChild(r);
+  }
+  const b = document.createElement("div");
+  if (role === "assistant") {
+    b.className = "bubble md";
+    renderMarkdown(b, text || "");
+  } else {
+    b.className = "bubble";
+    b.textContent = text || "";
+  }
+  row.appendChild(b);
+  box.appendChild(row);
+  if (msgId) addActions(row, b, role, msgId, text || "", stats);
+  return b;
+}
+
+/* chip metriche reali (prefill/gen TPS) — solo se presenti */
+function tpsChip(stats) {
+  let s = stats;
+  if (typeof s === "string") { try { s = JSON.parse(s); } catch (e) { return null; } }
+  if (!s || (!s.prefill_tps && !s.gen_tps && !s.model)) return null;
+  const parts = [];
+  if (s.model) parts.push(s.model);
+  if (s.prefill_tps) parts.push("⚡ " + s.prefill_tps);
+  if (s.gen_tps) parts.push("📝 " + s.gen_tps);
+  const el = document.createElement("span");
+  el.className = "tps-chip";
+  let title = "";
+  if (s.prompt_tokens) title += "prompt " + s.prompt_tokens + " tok";
+  if (s.cache_n) title += " · cache " + s.cache_n;
+  if (s.completion_tokens) title += " · gen " + s.completion_tokens;
+  if (s.ttft_s) title += " · ttft " + s.ttft_s + "s";
+  el.title = title.trim() ? title : "";
+  el.textContent = parts.join(" · ");
+  return el;
+}
+
+/* ── action bar (Copia · Rigenera/Elimina | Copia · Rimedia) ─── */
+function addActions(row, bubble, role, msgId, text, stats) {
+  const bar = document.createElement("div");
+  bar.className = "msg-actions";
+  const chip = tpsChip(stats);
+  if (chip) bar.appendChild(chip);
+  const mk = (label, title, fn) => {
+    const el = document.createElement("button");
+    el.className = "abtn";
+    el.textContent = label;
+    el.title = title;
+    el.addEventListener("click", fn);
+    bar.appendChild(el);
+    return el;
+  };
+  const copyBtn = mk("⧉", "Copia", () => copyText(text, copyBtn));
+  if (role === "assistant") {
+    const pb = mk("▶", "Ascolta risposta", () => {
+      if (audioEl) { stopPlayback(); micIdle(); refreshSend(); return; }
+      speakLive(text);
+    });
+    pb.classList.add("speak");
+    const rb = mk("↻", "Rigenera risposta", () => regenerateMessage(row, bubble));
+    // solo l'ultima risposta è rigenerabile (il backend opera sull'ultimo turno)
+    document.querySelectorAll(".msg-actions .abtn.regen").forEach((b) => b.style.display = "none");
+    rb.classList.add("regen");
+    mk("✕", "Elimina risposta", () => deleteMessage(row, msgId));
+  } else {
+    mk("✎", "Rimedia (modifica e invia)", () => editUserMessage(row, bubble, msgId));
+    mk("✕", "Elimina messaggio", () => deleteMessage(row, msgId));
+  }
+  row.appendChild(bar);
+}
+function copyText(t, btn) {
+  const done = () => { btn.textContent = "✓"; setTimeout(() => { btn.textContent = "⧉"; }, 1200); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(t).then(done).catch(() => fallbackCopy(t, done));
+  } else fallbackCopy(t, done);
+}
+function fallbackCopy(t, done) {
+  const ta = document.createElement("textarea");
+  ta.value = t; ta.style.position = "fixed"; ta.style.opacity = "0";
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand("copy"); done(); } catch (e) {}
+  ta.remove();
+}
+async function deleteMessage(row, msgId) {
+  if (!convId || streaming) return;
+  try {
+    const r = await fetch("/api/conversations/" + convId + "/messages/" + msgId, { method: "DELETE" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    row.remove();
+  } catch (e) { alert("Eliminazione fallita: " + e.message); }
+}
+async function regenerateMessage(row, bubble) {
+  if (streaming || !convId) return;
+  const model = currentModel();
+  if (!model) { alert("Seleziona un modello."); return; }
+  // il backend cancella l'ultima risposta: la togliamo anche a video
+  row.remove();
+  spawnSkeleton();
+  streaming = true; refreshSend();
+  setPill("rigenero…", "busy");
+  await streamChat({ model, conv_id: convId, regenerate: true });
+}
+function editUserMessage(row, bubble, msgId) {
+  if (streaming || !convId) return;
+  const orig = bubble.textContent;
+  bubble.replaceChildren();
+  const ta = document.createElement("textarea");
+  ta.className = "edit-area";
+  ta.value = orig;
+  const ok = document.createElement("button"); ok.textContent = "Invia"; ok.className = "abtn primary";
+  const no = document.createElement("button"); no.textContent = "Annulla"; no.className = "abtn";
+  no.addEventListener("click", () => { bubble.textContent = orig; });
+  ok.addEventListener("click", async () => {
+    const text = ta.value.trim();
+    if (!text) return;
+    const model = currentModel();
+    if (!model) { alert("Seleziona un modello."); return; }
+    ok.disabled = true;
+    bubble.textContent = orig;
+    // "rimedia" = reinvia come NUOVO turno in coda: la storia resta intatta
+    addBubble("user", text);
+    spawnSkeleton();
+    streaming = true;
+    refreshSend();
+    setPill("genero…", "busy");
+    await streamChat({ model, message: text });
+  });
+  bubble.appendChild(ta); bubble.appendChild(ok); bubble.appendChild(no);
+  ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+}
+
+/* ── skeleton "stato avanzamento" (dal valore reale del manager) ── */
+let skelState = null;
+function spawnSkeleton(initial) {
+  if (skelState) return;
+  const box = $("messages");
+  const row = document.createElement("div");
+  row.className = "row assistant";
+  const sk = document.createElement("div");
+  sk.className = "thinking-skel";
+  const st = document.createElement("div");
+  st.className = "skel-status";
+  st.textContent = initial || "Invio la richiesta…";
+  const bar = document.createElement("div");
+  bar.className = "skel-bar";
+  sk.appendChild(st);
+  sk.appendChild(bar);
+  row.appendChild(sk);
+  box.appendChild(row);
+  box.scrollTop = box.scrollHeight;
+  skelState = { row, el: st };
+}
+function setSkeleton(text) {
+  if (!skelState) return;
+  const el = skelState.el;
+  if (el.textContent === text) return;
+  el.textContent = text;
+  el.classList.remove("tick");
+  void el.offsetWidth; // restart animazione
+  el.classList.add("tick");
+}
+function killSkeleton() {
+  if (!skelState) return;
+  skelState.row.remove();
+  skelState = null;
+}
+
+/* ── temp files ─────────────────────────────── */
+$("attach-btn").addEventListener("click", () => $("file-input").click());
+$("file-input").addEventListener("change", async (e) => {
+  const files = Array.from(e.target.files || []);
+  e.target.value = "";
+  for (const f of files) {
+    const fd = new FormData();
+    fd.append("file", f);
+    setPill("upload " + f.name + "…", "busy");
+    try {
+      const r = await fetch("/api/upload", { method: "POST", body: fd });
+      const d = await r.json();
+      if (!r.ok || !d.files) throw new Error(d.error || ("HTTP " + r.status));
+      for (const s of d.files) {
+        attached.push(s);
+        addChip(s);
+      }
+      updatePill();
+    } catch (err) {
+      setPill("upload fallito", "err");
+      alert("Upload di " + f.name + " fallito: " + err.message);
+      setTimeout(updatePill, 1600);
+    }
+  }
+});
+
+function clearAttached() {
+  attached = [];
+  $("file-chips").innerHTML = "";
+}
+
+function addChip(f) {
+  const c = document.createElement("span");
+  c.className = "chip";
+  c.dataset.fid = f.id;
+  const nm = document.createElement("span");
+  nm.className = "nm";
+  nm.textContent = "📄 " + f.name;
+  nm.title = `${f.name} — ~${f.tokens_est} token (temporaneo, non salvato)`;
+  const rm = document.createElement("button");
+  rm.className = "rm";
+  rm.textContent = "✕";
+  rm.title = "Rimuovi file";
+  rm.addEventListener("click", async () => {
+    attached = attached.filter((x) => x.id !== f.id);
+    c.remove();
+    fetch("/api/files/" + encodeURIComponent(f.id), { method: "DELETE" });
+  });
+  c.appendChild(nm);
+  c.appendChild(rm);
+  $("file-chips").appendChild(c);
+}
+
+/* drag & drop */
+document.addEventListener("dragover", (e) => e.preventDefault());
+document.addEventListener("drop", async (e) => {
+  e.preventDefault();
+  const files = Array.from(e.dataTransfer.files || []);
+  if (!files.length) return;
+  const fd = new FormData();
+  for (const f of files) fd.append("file", f);
+  setPill("upload…", "busy");
+  try {
+    const r = await fetch("/api/upload", { method: "POST", body: fd });
+    const d = await r.json();
+    if (!r.ok || !d.files) throw new Error(d.error || ("HTTP " + r.status));
+    for (const s of d.files) { attached.push(s); addChip(s); }
+    updatePill();
+  } catch (err) {
+    setPill("upload fallito", "err");
+    alert("Upload fallito: " + err.message);
+    setTimeout(updatePill, 1600);
+  }
+});
+
+/* ── system prompt overlay: libreria di prompt ─────────── */
+let SPR = { list: [], activeId: "", activeName: "" };
+
+async function spRefresh(loadText = true) {
+  try {
+    const r = await fetch("/api/prompts");
+    const d = await r.json();
+    SPR.list = d.items || [];
+    SPR.activeId = d.active_id || "";
+    SPR.activeName = d.active_name || "";
+  } catch (e) { SPR.list = []; }
+  const sel = $("sp-active");
+  sel.innerHTML = '<option value="">— personalizzato —</option>';
+  for (const it of SPR.list) {
+    const o = document.createElement("option");
+    o.value = String(it.id);
+    o.textContent = it.name + " · " + it.chars + "c";
+    sel.appendChild(o);
+  }
+  sel.value = SPR.activeId;
+  sel.classList.toggle("active-custom", !SPR.activeId);
+  if (loadText) {
+    try {
+      const r = await fetch("/api/settings");
+      const d = await r.json();
+      $("sp-text").value = d.system_prompt || "";
+    } catch (e) { /* ignore */ }
+  }
+}
+
+$("sysprompt-btn").addEventListener("click", async () => {
+  $("overlay").classList.add("open");
+  $("sp-status").textContent = "";
+  $("sp-name").style.display = "none";
+  $("sp-del").style.display = "none";
+  await spRefresh(true);
+  $("sp-text").focus();
+});
+function closeOverlay() { $("overlay").classList.remove("open"); }
+$("sp-cancel").addEventListener("click", closeOverlay);
+$("overlay").addEventListener("click", (e) => { if (e.target === $("overlay")) closeOverlay(); });
+
+/* seleziona un prompt della libreria → lo attiva e ne carica il testo */
+$("sp-active").addEventListener("change", async () => {
+  const id = $("sp-active").value;
+  try {
+    const r = await fetch("/api/prompts/active", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: id || null }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || ("HTTP " + r.status));
+    if (id) {
+      const r2 = await fetch("/api/prompts/" + id);
+      const d2 = await r2.json();
+      $("sp-text").value = d2.content || "";
+      $("sp-status").textContent = "✓ attivo: " + (d2.name || "");
+    } else {
+      $("sp-status").textContent = "profilo personalizzato";
+    }
+    SPR.activeId = id;
+    $("sp-del").style.display = id ? "" : "none";
+    $("sp-active").classList.toggle("active-custom", !id);
+    refreshUsage();
+  } catch (e) { $("sp-status").textContent = "✗ " + e.message; }
+});
+
+/* ＋ nuovo → mostra il campo nome, salverà come NUOVO prompt */
+$("sp-new").addEventListener("click", () => {
+  const n = $("sp-name");
+  n.style.display = n.style.display === "none" ? "" : "none";
+  if (n.style.display === "") { $("sp-active").value = ""; n.focus(); }
+});
+
+/* elimina il prompt attivo */
+$("sp-del").addEventListener("click", async () => {
+  const id = $("sp-active").value;
+  if (!id) return;
+  if (!confirm("Eliminare questo system prompt dalla libreria?")) return;
+  try {
+    const r = await fetch("/api/prompts/" + id, { method: "DELETE" });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || ("HTTP " + r.status));
+    $("sp-status").textContent = "✓ eliminato";
+    await spRefresh(false);
+    $("sp-text").value = "";
+    $("sp-del").style.display = "none";
+  } catch (e) { $("sp-status").textContent = "✗ " + e.message; }
+});
+
+/* salva: se c'è un nome nuovo → crea e attiva; altrimenti aggiorna/crea il profilo */
+$("sp-save").addEventListener("click", async () => {
+  const txt = $("sp-text").value;
+  const newName = $("sp-name").style.display === "none" ? "" : $("sp-name").value.trim();
+  $("sp-status").textContent = "salvataggio…";
+  try {
+    if (newName) {
+      const r = await fetch("/api/prompts", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newName, content: txt, activate: true }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || ("HTTP " + r.status));
+      $("sp-status").textContent = "✓ creato e attivo: " + (d.name || newName);
+      $("sp-name").value = ""; $("sp-name").style.display = "none";
+    } else if (!SPR.activeName) {
+      // nessun profilo attivo: la PUT legacy scriverebbe nella chiave globale,
+      // da cui active_prompt() NON legge -> il salvataggio andrebbe perso.
+      // Salviamo quindi come profilo nuovo, così è sempre ritrovabile.
+      const nm = prompt("Nome del nuovo profilo:");
+      if (!nm) { $("sp-status").textContent = "annullato"; return; }
+      const r = await fetch("/api/prompts", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: nm.trim(), content: txt, activate: true }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || ("HTTP " + r.status));
+      $("sp-status").textContent = "✓ creato e attivo: " + (d.name || nm);
+    } else {
+      const r = await fetch("/api/settings", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ system_prompt: txt }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || ("HTTP " + r.status));
+      $("sp-status").textContent = "✓ salvato (" + d.chars + " char)" + (d.prompt ? " · " + d.prompt : "");
+    }
+    await spRefresh(false);
+    refreshUsage();
+  } catch (e) {
+    $("sp-status").textContent = "✗ " + e.message;
+  }
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && $("overlay").classList.contains("open")) closeOverlay();
+});
+
+/* ── compress ─────────────────────────────── */
+$("compress-btn").addEventListener("click", async () => {
+  if (!convId) { alert("Apri prima una conversazione con della storia."); return; }
+  const model = currentModel();
+  if (!model) { alert("Seleziona un modello."); return; }
+  if (!confirm("Comprimere la storia? I messaggi vecchi verranno riassunti dal modello e nascosti (restano nel DB).")) return;
+  $("compress-btn").disabled = true;
+  setPill("compressione…", "busy");
+  try {
+    const r = await fetch("/api/compress", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ conv_id: convId, model }),
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || d.reason || ("HTTP " + r.status));
+    setPill(`compressa: ${d.before}→${d.after} tok`, "ok");
+    await openConv(convId);
+    setTimeout(updatePill, 2500);
+  } catch (e) {
+    setPill("compressione fallita", "err");
+    alert("Compressione fallita: " + e.message);
+    setTimeout(updatePill, 2500);
+  } finally {
+    $("compress-btn").disabled = false;
+  }
+});
+
+/* ── send / stream ─────────────────────────────── */
+function refreshSend() {
+  const playing = !!audioEl;
+  $("send").style.display = streaming || !hasText() || playing ? "none" : "";
+  $("mic").style.display = streaming || playing || readOnly ? "none" : "";
+  $("stop").style.display = streaming ? "" : "none";
+}
+
+/* ── LIVE speech-to-speech: mic → STT → chat → TTS ───────── */
+let recorder = null, recChunks = [], recTimer = null, recSecs = 0;
+let audioEl = null, liveTurn = false;
+
+function hasText() { return ($("input").value || "").trim().length > 0; }
+function stopPlayback() { if (audioEl) { try { audioEl.pause(); } catch (e) {} audioEl = null; } }
+
+function micIdle() {
+  clearInterval(recTimer);
+  const m = $("mic");
+  m.classList.remove("rec", "play");
+  m.textContent = audioEl ? "🔊" : "🎤";
+  m.title = audioEl ? "Ferma la voce"
+    : "Parla (trascrive e invia; la risposta viene letta)";
+}
+
+async function toggleMic() {
+  if (audioEl) { stopPlayback(); micIdle(); return; }          // barge-in
+  if (recorder && recorder.state === "recording") { recorder.stop(); return; }
+  if (!navigator.mediaDevices || !window.MediaRecorder) {
+    alert("Microfono non supportato da questo browser (serve HTTPS)."); return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+      ? "audio/webm;codecs=opus" : "";
+    recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : {});
+    recChunks = [];
+    recorder.ondataavailable = (e) => { if (e.data.size) recChunks.push(e.data); };
+    recorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      clearInterval(recTimer);
+      const m0 = $("mic"); m0.classList.remove("rec"); m0.textContent = "…";
+      const blob = new Blob(recChunks, { type: "audio/webm" });
+      micIdle();
+      if (blob.size < 3000) return;                            // troppo corto
+      setPill("trascrivo…", "");
+      const fd = new FormData();
+      fd.append("file", blob, "voice.webm");
+      let txt = "";
+      try {
+        const r = await fetch("/api/stt", { method: "POST", body: fd });
+        const d = await r.json();
+        txt = (d.text || "").trim();
+        if (d.error) setPill("errore STT", "err");
+      } catch (e) { setPill("errore STT", "err"); }
+      if (!txt) { setPill("", ""); return; }
+      liveTurn = true;
+      $("input").value = txt;
+      await send(true);
+    };
+    recorder.start();
+    recSecs = 0;
+    const m = $("mic");
+    m.classList.add("rec"); m.textContent = "■ 0\"";
+    m.title = "Stop e trascrivi";
+    recTimer = setInterval(() => { recSecs++; m.textContent = "■ " + recSecs + "\""; }, 1000);
+    setPill("ascolto…", "");
+  } catch (e) {
+    setPill("", "");
+    if (e && e.name === "NotAllowedError")
+      alert("Permesso microfono negato: riattivalo nelle impostazioni del browser.");
+  }
+}
+
+async function speakLive(text) {
+  stopPlayback();
+  setPill("parlo…", "");
+  try {
+    const r = await fetch("/api/tts", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }) });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || "tts " + r.status); }
+    const blob = await r.blob();
+    audioEl = new Audio(URL.createObjectURL(blob));
+    audioEl.onended = () => { audioEl = null; micIdle(); refreshSend(); setPill("", ""); };
+    await audioEl.play();
+    micIdle(); refreshSend();
+  } catch (e) {
+    audioEl = null; setPill("", "");
+    console.warn("tts:", e && e.message);
+    refreshSend();
+  }
+}
+
+async function send(live) {
+  const ta = $("input");
+  const text = ta.value.trim();
+  if (!text || streaming) return;
+  liveTurn = !!live;
+  const model = currentModel();
+  if (!model) { alert("Seleziona un modello."); return; }
+
+  const empty = $("empty");
+  if (empty) empty.remove();
+
+  const sentFileIds = attached.map((f) => f.id);
+  const sentFileNames = attached.map((f) => f.name);
+  const shown = text + (sentFileNames.length ? "\n📎 " + sentFileNames.join(", ") : "");
+  const userRow = addBubble("user", shown).parentElement;
+  spawnSkeleton();
+  ta.value = "";
+  ta.style.height = "auto";
+  clearAttached();
+  streaming = true;
+  refreshSend();
+  setPill("genero…", "busy");
+
+  await streamChat({ message: text, model, file_ids: sentFileIds });
+}
+
+/* POST /api/chat e consumo SSE; ritorna {bubble, raw, msgId}. */
+async function streamChat(opts) {
+  let botBubble = null;
+  let reasonEl = null;
+  let botRaw = "";
+  let gotAny = false;
+  let newMsgId = null;
+  abortCtl = new AbortController();
+
+  const url = opts.regenerate ? "/api/regenerate" : "/api/chat";
+  try {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: opts.message || "", model: opts.model,
+        conv_id: opts.conv_id !== undefined ? opts.conv_id : convId,
+        file_ids: opts.file_ids || [], regenerate: !!opts.regenerate,
+      }),
+      signal: abortCtl.signal,
+    });
+    if (!r.ok || !r.body) {
+      const err = await r.json().catch(() => ({}));
+      killSkeleton();
+      botBubble = addBubble("assistant", "⚠ " + (err.error || ("HTTP " + r.status)));
+      setPill("errore", "err");
+      return;
+    }
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    let ev = null;
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, idx).replace(/\r$/, "");
+        buf = buf.slice(idx + 1);
+        if (line.startsWith("event: ")) {
+          ev = line.slice(7).trim();
+        } else if (line.startsWith("data: ")) {
+          let d;
+          try { d = JSON.parse(line.slice(6)); } catch (e) { continue; }
+          if (ev === "status") {
+            setSkeleton(d.s);
+          } else if (ev === "meta") {
+            convId = d.conv_id;
+            loadConvs(convId);
+          } else if (ev === "compressed" && d.info) {
+            const info = d.info;
+            if (info.error) {
+              addBubble("system", "⚠ Compressione automatica fallita: " + info.error);
+            } else if (info.ok) {
+              addBubble("system", `🗜 Contesto compresso automaticamente: ${info.hidden} messaggi riassunti (${info.before} → ${info.after} token stimati).`);
+            }
+            $("messages").scrollTop = $("messages").scrollHeight;
+          } else if (ev === "files_notice") {
+            addBubble("system", `📎 File allegati a questo turno: ${d.names.join(", ")} (~${d.tokens} token, temporanei — non salvati).`);
+            $("messages").scrollTop = $("messages").scrollHeight;
+          } else if (ev === "content") {
+            gotAny = true;
+            killSkeleton();
+            if (!botBubble) botBubble = addBubble("assistant", "");
+            botRaw += d.t;
+            scheduleMd(botBubble, botRaw);
+          } else if (ev === "reasoning") {
+            gotAny = true;
+            killSkeleton();
+            if (!reasonEl) {
+              if (!botBubble) botBubble = addBubble("assistant", "");
+              reasonEl = document.createElement("div");
+              reasonEl.className = "reasoning closed";
+              reasonEl.title = "Clicca per espandere/collassare";
+              reasonEl.dataset.txt = "";
+              reasonEl.addEventListener("click", () => reasonEl.classList.toggle("closed"));
+              botBubble.parentElement.insertBefore(reasonEl, botBubble);
+            }
+            reasonEl.dataset.txt += d.t;
+            reasonEl.textContent = "💭 " + reasonEl.dataset.txt;
+            $("messages").scrollTop = $("messages").scrollHeight;
+          } else if (ev === "error") {
+            killSkeleton();
+            if (!botBubble) botBubble = addBubble("assistant", "");
+            botRaw += (botRaw ? "\n\n" : "") + "⚠ " + d.message;
+            renderMarkdown(botBubble, botRaw);
+            setPill("errore", "err");
+          } else if (ev === "done") {
+            killSkeleton();
+            convId = d.conv_id;
+            if (!gotAny) {
+              if (!botBubble) botBubble = addBubble("assistant", "");
+              botBubble.textContent += "(nessun contenuto)";
+            }
+            if (d.msg_id && botBubble) addActions(botBubble.parentElement, botBubble, "assistant", d.msg_id, botRaw, d.stats);
+            if (liveTurn && gotAny && botRaw) { const t = botRaw; liveTurn = false; speakLive(t); }
+            if (d.user_msg_id) {
+              const urows = document.querySelectorAll(".row.user");
+              const lastU = urows[urows.length - 1];
+              if (lastU && !lastU.querySelector(".msg-actions")) {
+                const ub = lastU.querySelector(".bubble");
+                addActions(lastU, ub, "user", d.user_msg_id, ub.textContent);
+              }
+            }
+            setPill("fatto", "ok");
+          }
+        }
+      }
+    }
+  } catch (e) {
+    killSkeleton();
+    if (e.name === "AbortError") {
+      setPill("interrotto", "");
+      if (!botBubble) botBubble = addBubble("assistant", "");
+      botBubble.textContent += "\n■ interrotto";
+    } else {
+      setPill("errore rete", "err");
+      if (!botBubble) botBubble = addBubble("assistant", "");
+      botRaw += (botRaw ? "\n\n" : "") + "⚠ " + e.message;
+      renderMarkdown(botBubble, botRaw);
+    }
+  } finally {
+    streaming = false;
+    refreshSend();
+    loadConvs(convId);
+    refreshUsage();
+    $("input").focus();
+  }
+}
+
+/* ── mobile sidebar drawer ─────────────────────── */
+function drawerOpen() {
+  $("sidebar").classList.add("open");
+  $("sidebar-backdrop").classList.add("open");
+  $("menu-icon-open").style.display = "none";
+  $("menu-icon-close").style.display = "block";
+}
+function closeDrawer() {
+  $("sidebar").classList.remove("open");
+  $("sidebar-backdrop").classList.remove("open");
+  $("menu-icon-open").style.display = "block";
+  $("menu-icon-close").style.display = "none";
+  $("sidebar").style.transform = "";
+}
+$("menu-btn").addEventListener("click", () => {
+  $("sidebar").classList.contains("open") ? closeDrawer() : drawerOpen();
+});
+$("sidebar-backdrop").addEventListener("click", closeDrawer);
+
+// swipe: apri dal bordo sinistro / chiudi trascinando la sidebar verso sinistra
+(function() {
+  const bar = $("sidebar");
+  const W = 280;                      // larghezza drawer
+  let sx = 0, sy = 0, dx = 0, dragging = false, edgeStart = false;
+
+  bar.addEventListener("touchstart", (e) => {
+    if (window.innerWidth > 720) return;
+    const t = e.touches[0];
+    sx = t.clientX; sy = t.clientY; dx = 0;
+    dragging = false;
+    edgeStart = false;
+    bar.style.transition = "none";
+  }, { passive: true });
+
+  bar.addEventListener("touchmove", (e) => {
+    if (window.innerWidth > 720) return;
+    const t = e.touches[0];
+    dx = t.clientX - sx;
+    const dy = t.clientY - sy;
+    const isOpen = bar.classList.contains("open");
+    if (!dragging && Math.abs(dx) > 10 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      // aperta: trascina verso sinistra; chiusa: solo se partito dal bordo
+      dragging = isOpen ? dx < 0 : false;
+    }
+    if (dragging) {
+      const off = isOpen ? Math.min(0, dx) : dx;   // aperta: 0..-W
+      bar.style.transform = "translateX(" + off + "px)";
+    }
+  }, { passive: true });
+
+  bar.addEventListener("touchend", () => {
+    bar.style.transition = "";
+    if (!dragging) { bar.style.transform = ""; return; }
+    const isOpen = bar.classList.contains("open");
+    if (isOpen && dx < -W * 0.3) { closeDrawer(); }   // chiudi con swipe deciso a sx
+    else if (isOpen) { bar.style.transform = ""; }     // riaggancia
+    else { bar.style.transform = ""; }
+    dragging = false;
+  });
+
+  // swipe-to-open dal bordo sinistro dello schermo (quando il drawer è chiuso)
+  document.addEventListener("touchstart", (e) => {
+    if (window.innerWidth > 720) return;
+    if (bar.classList.contains("open")) return;
+    const t = e.touches[0];
+    if (t.clientX <= 24 && !$( "sp-modal")?.classList.contains("open")) {
+      edgeStart = true; sx = t.clientX; sy = t.clientY;
+    }
+  }, { passive: true });
+  document.addEventListener("touchmove", (e) => {
+    if (!edgeStart || window.innerWidth > 720) return;
+    const t = e.touches[0];
+    dx = t.clientX - sx;
+    if (dx > 10 && Math.abs(dx) > Math.abs(t.clientY - sy)) {
+      bar.style.transition = "none";
+      bar.style.transform = "translateX(" + Math.min(0, dx - W) + "px)";
+    }
+  }, { passive: true });
+  document.addEventListener("touchend", () => {
+    if (!edgeStart) return;
+    edgeStart = false;
+    bar.style.transition = "";
+    if (dx > W * 0.3) drawerOpen();
+    else bar.style.transform = "";
+    dx = 0;
+  });
+})();
+
+/* ── wiring ─────────────────────────────── */
+$("stop").addEventListener("click", () => { if (abortCtl) abortCtl.abort(); });
+$("new-chat").addEventListener("click", () => { closeDrawer(); newChat(); });
+$("model-select").addEventListener("change", () => {
+  localStorage.setItem("dc_model", currentModel());
+  updatePill();
+  refreshUsage();
+});
+
+const ta = $("input");
+ta.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+});
+ta.addEventListener("input", () => {
+  ta.style.height = "auto";
+  ta.style.height = Math.min(ta.scrollHeight, 180) + "px";
+  refreshSend();
+});
+$("mic").addEventListener("click", toggleMic);
+$("send").addEventListener("click", () => send());
+
+(async function init() {
+  await ensureSession();
+  await loadModels();
+  const linkConv = new URLSearchParams(location.search).get("conv");
+  if (linkConv) {
+    // link pubblico: lettura della chat indicata anche senza sessione
+    await openConv(parseInt(linkConv, 10), true);
+  } else {
+    await loadConvs(null);
+  }
+  refreshSend();
+  setInterval(loadModels, 30000);
+})();
+
+/* link di sola lettura: condividi SOLO l'id, mai il token di sessione */
+$("share-btn").addEventListener("click", () => {
+  if (!convId) return;
+  const url = location.origin + location.pathname + "?conv=" + convId;
+  const btn = $("share-btn");
+  const flash = () => { btn.textContent = "✓"; setTimeout(() => { btn.textContent = "🔗"; }, 1200); };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(flash).catch(() => window.prompt("Copia il link:", url));
+  } else window.prompt("Copia il link:", url);
+});
+
+$("key-btn").addEventListener("click", sessionKeyUI);
+
+/* ── tastiera mobile: viewport reale ─────────────────────
+   iOS non supporta interactive-widget, quindi quando la tastiera sale la
+   finestra si sposta e la composer finisce sotto di essa. Ancoriamo invece
+   l'app alla visual viewport: offsetTop + altezza visibile. */
+(function viewportFix() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const app = document.body;
+  const atBottom = () => {
+    const m = $("messages");
+    return !m || (m.scrollHeight - m.scrollTop - m.clientHeight) < 120;
+  };
+  let stick = true;
+  const apply = () => {
+    if (stick) app.style.height = vv.height + "px";
+    app.style.transform = vv.offsetTop ? `translateY(${vv.offsetTop}px)` : "";
+    if (stick) {
+      const m = $("messages");
+      if (m) m.scrollTop = m.scrollHeight;
+    }
+  };
+  vv.addEventListener("resize", () => { apply(); });
+  vv.addEventListener("scroll", () => { apply(); });
+  $("input").addEventListener("focus", () => { stick = true; document.body.classList.add("kb-open"); setTimeout(apply, 60); });
+  $("input").addEventListener("blur", () => { stick = false; document.body.classList.remove("kb-open"); app.style.height = ""; app.style.transform = ""; });
+  $("messages").addEventListener("scroll", () => { stick = atBottom(); });
+})();
+</script>
+<script src="/registerSW.js"></script>
+</body>
+</html>

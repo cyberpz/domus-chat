@@ -1,0 +1,19 @@
+services:
+  domus-chat:
+    build: .
+    image: domus-chat:latest
+    container_name: domus-chat
+    restart: unless-stopped
+    ports:
+      - "3003:8080"
+    volumes:
+      - ./data:/data
+    environment:
+      - UPSTREAM=${UPSTREAM:-http://127.0.0.1:1234}
+      - UPSTREAM_AUTH=${UPSTREAM_AUTH:-}
+      - DB_PATH=/data/chat.db
+      - PORT=8080
+    deploy:
+      resources:
+        limits:
+          memory: 256M
