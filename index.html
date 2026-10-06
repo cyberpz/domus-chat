@@ -1120,6 +1120,8 @@ function editUserMessage(row, bubble, msgId) {
 
 /* ── skeleton "stato avanzamento" (dal valore reale del manager) ── */
 let skelState = null;
+const THINKING_PHRASES = ["Ci penso…", "Sto pensando…", "Vedo un attimo…", "Un momento…", "Elaboro…", "Quasi fatto…"];
+let skelThinkTimer = null;
 function spawnSkeleton(initial) {
   if (skelState) return;
   const box = $("messages");
@@ -1136,19 +1138,31 @@ function spawnSkeleton(initial) {
   sk.appendChild(bar);
   row.appendChild(sk);
   box.appendChild(row);
-  box.scrollTop = box.scrollHeight;
-  skelState = { row, el: st };
+  scrollToBottom(true);
+  skelState = { row, el: st, lastSet: Date.now() };
+  // dopo 2s senza status update dal manager, inizia a ruotare frasi "pensiero"
+  clearInterval(skelThinkTimer);
+  skelThinkTimer = setInterval(() => {
+    if (!skelState) { clearInterval(skelThinkTimer); return; }
+    if (Date.now() - skelState.lastSet > 2000) {
+      const phrase = THINKING_PHRASES[Math.floor(Math.random() * THINKING_PHRASES.length)];
+      setSkeleton(phrase);
+    }
+  }, 3000);
 }
 function setSkeleton(text) {
   if (!skelState) return;
   const el = skelState.el;
   if (el.textContent === text) return;
   el.textContent = text;
+  skelState.lastSet = Date.now();
   el.classList.remove("tick");
   void el.offsetWidth; // restart animazione
   el.classList.add("tick");
 }
 function killSkeleton() {
+  clearInterval(skelThinkTimer);
+  skelThinkTimer = null;
   if (!skelState) return;
   skelState.row.remove();
   skelState = null;
