@@ -60,7 +60,23 @@ FILE_TTL_S = int(float(os.environ.get("FILE_TTL_HOURS", "6")) * 3600)
 FILE_MAX_BYTES = int(float(os.environ.get("FILE_MAX_MB", "5")) * 1024 * 1024)
 
 CHARS_PER_TOKEN = 4          # rough estimate, fine for budgeting
-FALLBACK_CTX = 8192          # when the catalog has no ctx info
+FALLBACK_CTX = 131072        # generous default — most local models support 32K-131K
+# Known context lengths for models that don't report ctx in /v1/models
+KNOWN_CTX = {
+    "Qwen3": 131072,
+    "Qwen3.6": 131072,
+    "Qwen3.8": 131072,
+    "gemma-4": 131072,
+    "Gemma-4": 131072,
+    "Mellum": 131072,
+    "Spark": 32768,
+    "MiniCPM": 32768,
+    "Hy-MT2": 32768,
+    "lfm2": 32768,
+    "Ornith": 32768,
+    "nomic-embed": 8192,
+    "qwen3-asr": 16384,
+}
 SUMMARY_MAX_TOKENS = 2048
 
 _db_lock = threading.Lock()
@@ -511,6 +527,11 @@ def model_ctx(model_id):
     for m in catalog():
         if m["id"] == model_id:
             return m["ctx"] or FALLBACK_CTX
+    # Fallback: match by substring in KNOWN_CTX
+    if model_id:
+        for prefix, ctx in KNOWN_CTX.items():
+            if prefix.lower() in model_id.lower():
+                return ctx
     return FALLBACK_CTX
 
 
