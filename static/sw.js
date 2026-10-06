@@ -1,5 +1,5 @@
 /* DomusChat service worker — app shell cache-first, API sempre in rete. */
-const CACHE = "domuschat-v14";
+const CACHE = "domuschat-v15";
 const SHELL = ["/", "/index.html", "/manifest.json", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (e) => {

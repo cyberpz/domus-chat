@@ -348,14 +348,24 @@ def upstream_open(payload: dict, stream: bool, path="/v1/chat/completions"):
     body = json.dumps(payload).encode()
     req = urllib.request.Request(auth_url(path), data=body, method="POST")
     req.add_header("Content-Type", "application/json")
+    if AUTH_TOKEN:
+        req.add_header("Authorization", f"Bearer {AUTH_TOKEN}")
     req.add_header("Accept", "text/event-stream" if stream else "application/json")
     return urllib.request.urlopen(req, timeout=900)
+
+
+def upstream_get(path, timeout=15):
+    """GET request to upstream with Bearer auth header when token is set."""
+    req = urllib.request.Request(auth_url(path))
+    if AUTH_TOKEN:
+        req.add_header("Authorization", f"Bearer {AUTH_TOKEN}")
+    return urllib.request.urlopen(req, timeout=timeout)
 
 
 def manager_status():
     """Stato reale del LLM manager (/status). None se irraggiungibile."""
     try:
-        with urllib.request.urlopen(auth_url("/status"), timeout=4) as r:
+        with upstream_get("/status", timeout=4) as r:
             return json.loads(r.read().decode("utf-8", "replace"))
     except Exception:
         return None
@@ -469,7 +479,7 @@ def catalog(force=False):
     if not force and now - _model_cache["ts"] < 15:
         return _model_cache["models"]
     try:
-        with urllib.request.urlopen(auth_url("/v1/models"), timeout=15) as r:
+        with upstream_get("/v1/models", timeout=15) as r:
             raw = json.loads(r.read().decode())
         data = raw.get("data", raw) if isinstance(raw, dict) else raw
         models = []

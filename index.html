@@ -968,9 +968,12 @@ function scheduleMd(el, text) {
     scrollToBottom();
   });
 }
-function scrollToBottom() {
+function scrollToBottom(force) {
   const m = $("messages");
-  m.scrollTop = m.scrollHeight;
+  if (!m) return;
+  if (force || (m.scrollHeight - m.scrollTop - m.clientHeight) < 120) {
+    m.scrollTop = m.scrollHeight;
+  }
 }
 
 function addBubble(role, text, reasoning, msgId, stats) {
@@ -1567,10 +1570,10 @@ async function streamChat(opts) {
             } else if (info.ok) {
               addBubble("system", `🗜 Contesto compresso automaticamente: ${info.hidden} messaggi riassunti (${info.before} → ${info.after} token stimati).`);
             }
-            $("messages").scrollTop = $("messages").scrollHeight;
+            scrollToBottom();
           } else if (ev === "files_notice") {
             addBubble("system", `📎 File allegati a questo turno: ${d.names.join(", ")} (~${d.tokens} token, temporanei — non salvati).`);
-            $("messages").scrollTop = $("messages").scrollHeight;
+            scrollToBottom();
           } else if (ev === "content") {
             gotAny = true;
             killSkeleton();
@@ -1591,7 +1594,7 @@ async function streamChat(opts) {
             }
             reasonEl.dataset.txt += d.t;
             reasonEl.textContent = "💭 " + reasonEl.dataset.txt;
-            $("messages").scrollTop = $("messages").scrollHeight;
+            scrollToBottom();
           } else if (ev === "error") {
             killSkeleton();
             if (!botBubble) botBubble = addBubble("assistant", "");
@@ -1793,7 +1796,7 @@ $("key-btn").addEventListener("click", sessionKeyUI);
   const apply = () => {
     if (stick) app.style.height = vv.height + "px";
     app.style.transform = vv.offsetTop ? `translateY(${vv.offsetTop}px)` : "";
-    if (stick) {
+    if (stick && atBottom()) {
       const m = $("messages");
       if (m) m.scrollTop = m.scrollHeight;
     }
