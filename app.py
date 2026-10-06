@@ -526,8 +526,10 @@ def catalog(force=False):
 def model_ctx(model_id):
     for m in catalog():
         if m["id"] == model_id:
-            return m["ctx"] or FALLBACK_CTX
-    # Fallback: match by substring in KNOWN_CTX
+            if m["ctx"]:
+                return m["ctx"]
+            break  # found but no ctx — fall through to KNOWN_CTX
+    # Match by substring in KNOWN_CTX
     if model_id:
         for prefix, ctx in KNOWN_CTX.items():
             if prefix.lower() in model_id.lower():
