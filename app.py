@@ -54,6 +54,9 @@ PORT = int(os.environ.get("PORT", "8080"))
 COMPRESS_AT = float(os.environ.get("COMPRESS_AT", "0.9"))
 STT_URL = os.environ.get("STT_URL", "").rstrip("/")
 TTS_VOICE = os.environ.get("TTS_VOICE", "en-US-AriaNeural")
+# Agent backend (Hermes API Server — Laris profile)
+AGENT_UPSTREAM = os.environ.get("AGENT_UPSTREAM", "http://127.0.0.1:8091").rstrip("/")
+AGENT_AUTH = os.environ.get("AGENT_AUTH", "")
 COMPRESS_KEEP = int(os.environ.get("COMPRESS_KEEP", "6"))
 RESP_RESERVE = int(os.environ.get("RESP_RESERVE", "8192"))
 FILE_TTL_S = int(float(os.environ.get("FILE_TTL_HOURS", "6")) * 3600)
@@ -370,6 +373,18 @@ def upstream_open(payload: dict, stream: bool, path="/v1/chat/completions"):
     return urllib.request.urlopen(req, timeout=900)
 
 
+def agent_open(payload: dict, stream: bool, path="/v1/chat/completions"):
+    """Open a request to the agent backend (Laris API Server)."""
+    url = AGENT_UPSTREAM + path
+    body = json.dumps(payload).encode()
+    req = urllib.request.Request(url, data=body, method="POST")
+    req.add_header("Content-Type", "application/json")
+    if AGENT_AUTH:
+        req.add_header("Authorization", f"Bearer {AGENT_AUTH}")
+    req.add_header("Accept", "text/event-stream" if stream else "application/json")
+    return urllib.request.urlopen(req, timeout=900)
+
+
 def upstream_get(path, timeout=15):
     """GET request to upstream with Bearer auth header when token is set."""
     req = urllib.request.Request(auth_url(path))
@@ -520,7 +535,22 @@ def catalog(force=False):
     except Exception:
         if not _model_cache["models"]:
             _model_cache["models"] = []
-    return _model_cache["models"]
+    # Prepend Laris agent as first option
+    result = list(_model_cache["models"])
+    laris_entry = {
+        "id": "laris",
+        "label": "🤖 Laris (agente)",
+        "alias": "laris",
+        "available": True,
+        "loaded": True,
+        "status": "",
+        "ctx": 131072,
+        "agent": True,
+    }
+    # Insert at top if not already present
+    if not any(m.get("id") == "laris" for m in result):
+        result.insert(0, laris_entry)
+    return result
 
 
 def model_ctx(model_id):
@@ -1191,7 +1221,8 @@ def make_handler():
             me = owner_key(tok)
 
             # auto-load model if the manager supports it (fire and forget on failure)
-            load_model_if_needed(model)
+            if model != "laris":
+                load_model_if_needed(model)
 
             if not conv_id:
                 now = int(time.time())
@@ -1306,7 +1337,8 @@ def make_handler():
             usage = None      # {prompt_tokens, completion_tokens, ...}
             timings = None    # timings llama.cpp (prefill/gen)
             try:
-                with upstream_open(payload, stream=True) as resp:
+                open_fn = agent_open if model == "laris" else upstream_open
+                with open_fn(payload, stream=True) as resp:
                     stop_status.set()
                     pump.join(timeout=5)  # azzera il pump prima di scrivere contenuti
                     t_stream = time.time()
