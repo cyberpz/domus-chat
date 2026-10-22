@@ -1905,14 +1905,15 @@ $("sidebar-backdrop").addEventListener("click", closeDrawer);
 $("stop").addEventListener("click", () => { if (abortCtl) abortCtl.abort(); });
 $("new-chat").addEventListener("click", () => { closeDrawer(); newChat(); });
 
-// il selettore resta cosciente dei modelli: refresh periodico (il catalogo
-// lato server ha cache 15s, quindi è economico). Mai durante lo streaming o
-// se l'utente ha il menu aperto.
+// il selettore resta cosciente dei modelli: refresh periodico. L'intervallo
+// (12s) deve restare SOTTO il TTL del catalogo lato server (15s) così la
+// cache è sempre calda: la guard pre-chat non blocca mai sul timeout del
+// manager. Mai durante lo streaming o con menu aperto.
 setInterval(() => {
   if (streaming) return;
   if (document.activeElement === $("model-select")) return;
   loadModels();
-}, 20000);
+}, 12000);
 $("model-select").addEventListener("change", () => {
   localStorage.setItem("dc_model", currentModel());
   updatePill();
