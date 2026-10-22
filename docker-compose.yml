@@ -11,9 +11,16 @@ services:
     environment:
       - UPSTREAM=${UPSTREAM:-http://127.0.0.1:1234}
       - UPSTREAM_AUTH=${UPSTREAM_AUTH:-}
+      - AGENT_UPSTREAM=${AGENT_UPSTREAM:-http://172.17.0.1:8091}
+      - AGENT_AUTH=${AGENT_AUTH:-}
+      - HALOGEN_UPSTREAM=${HALOGEN_UPSTREAM:-http://192.168.178.93:8731}
+      - HALOGEN_AUTH=${HALOGEN_AUTH:-}
       - DB_PATH=/data/chat.db
       - PORT=8080
+      - STT_URL=http://192.168.178.71:8090
+      - OMNI_BASE=http://192.168.178.71:8888/v1
+      - OMNI_AUTH=sk-unsloth-6cabf72c5035e98758cedab09945a8a2
     deploy:
       resources:
         limits:
-          memory: 256M
+          memory: 1G

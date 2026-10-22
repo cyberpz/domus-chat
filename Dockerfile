@@ -1,6 +1,7 @@
 FROM python:3.12-slim
 WORKDIR /app
-RUN pip install --no-cache-dir edge-tts
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir edge-tts supertonic onnxruntime
 COPY app.py index.html ./
 COPY static ./static
 ENV PORT=8080 DB_PATH=/data/chat.db

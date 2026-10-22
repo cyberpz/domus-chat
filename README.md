@@ -37,6 +37,10 @@ Backend testati: [local-llm-manager](https://github.com/cyberpz/local-llm-manage
 |---|---|---|
 | `UPSTREAM` | `http://127.0.0.1:1234` | Base URL OpenAI-compatible |
 | `UPSTREAM_AUTH` | vuoto | Token backend (query param `?api_key=`, vedi note) |
+| `AGENT_UPSTREAM` | `http://172.17.0.1:8091` | Backend agente (Hermes API Server) |
+| `AGENT_AUTH` | vuoto | Token dell'agente |
+| `HALOGEN_UPSTREAM` | `http://192.168.178.93:8731` | Provider addizionale Halogen.cpp (OpenAI-compat); vuoto = nascosto |
+| `HALOGEN_AUTH` | vuoto | Token dell'upstream Halogen |
 | `STT_URL` | vuoto (off) | Server Whisper/OpenAI-style per il microfono |
 | `TTS_VOICE` | `en-US-AriaNeural` | Voce edge-tts (serve internet; `it-IT-DiegoNeural` per l'italiano) |
 | `DB_PATH` | `/data/chat.db` | SQLite nel container |

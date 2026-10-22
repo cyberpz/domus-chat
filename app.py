@@ -32,11 +32,13 @@ Environment:
 
 import html
 import hashlib
+import http.client
 import json
 import os
 import re
 import secrets
 import sqlite3
+import subprocess
 import threading
 import time
 import urllib.error
@@ -53,10 +55,17 @@ PORT = int(os.environ.get("PORT", "8080"))
 
 COMPRESS_AT = float(os.environ.get("COMPRESS_AT", "0.9"))
 STT_URL = os.environ.get("STT_URL", "").rstrip("/")
-TTS_VOICE = os.environ.get("TTS_VOICE", "en-US-AriaNeural")
+OMNI_BASE = os.environ.get("OMNI_BASE", "http://192.168.178.71:8891/v1").rstrip("/")
+OMNI_AUTH = os.environ.get("OMNI_AUTH", "")
+TTS_VOICE = os.environ.get("TTS_VOICE", "it-IT-DiegoNeural")
 # Agent backend (Hermes API Server — Laris profile)
 AGENT_UPSTREAM = os.environ.get("AGENT_UPSTREAM", "http://127.0.0.1:8091").rstrip("/")
 AGENT_AUTH = os.environ.get("AGENT_AUTH", "")
+# Provider addizionale: Halogen.cpp su EVO-X2 (OpenAI-compat, no auth). Svuotando
+# l'env l'HALOGEN_UPSTREAM il provider non compare nel catalogo.
+HALOGEN_UPSTREAM = os.environ.get("HALOGEN_UPSTREAM", "http://192.168.178.93:8731").rstrip("/")
+HALOGEN_AUTH = os.environ.get("HALOGEN_AUTH", "")
+HALOGEN_PREFIX = "halogen/"  # prefisso degli id modello nel catalogo
 COMPRESS_KEEP = int(os.environ.get("COMPRESS_KEEP", "6"))
 RESP_RESERVE = int(os.environ.get("RESP_RESERVE", "8192"))
 FILE_TTL_S = int(float(os.environ.get("FILE_TTL_HOURS", "6")) * 3600)
@@ -66,6 +75,7 @@ CHARS_PER_TOKEN = 4          # rough estimate, fine for budgeting
 FALLBACK_CTX = 131072        # generous default — most local models support 32K-131K
 # Known context lengths for models that don't report ctx in /v1/models
 KNOWN_CTX = {
+    "halogen": 262144,
     "Qwen3": 131072,
     "Qwen3.6": 131072,
     "Qwen3.8": 131072,
@@ -86,6 +96,7 @@ _db_lock = threading.Lock()
 _files_lock = threading.Lock()
 FILE_STORE = {}              # fid -> {name, text, size, ts}  (RAM only, never persisted)
 _model_cache = {"ts": 0.0, "models": []}
+_halogen_cache = {"ts": 0.0, "models": []}
 
 
 def est_tokens(text):
@@ -385,6 +396,36 @@ def agent_open(payload: dict, stream: bool, path="/v1/chat/completions"):
     return urllib.request.urlopen(req, timeout=900)
 
 
+def halogen_open(payload: dict, stream: bool, path="/v1/chat/completions"):
+    """Open a request to the Halogen.cpp provider on EVO-X2 (OpenAI-compat)."""
+    url = HALOGEN_UPSTREAM + path
+    body = json.dumps(payload).encode()
+    req = urllib.request.Request(url, data=body, method="POST")
+    req.add_header("Content-Type", "application/json")
+    if HALOGEN_AUTH:
+        req.add_header("Authorization", f"Bearer {HALOGEN_AUTH}")
+    req.add_header("Accept", "text/event-stream" if stream else "application/json")
+    return urllib.request.urlopen(req, timeout=900)
+
+
+def split_provider(model_id: str):
+    """Riparte un id modello in (provider, id_reale).
+
+    'laris' -> agente; 'halogen/<x>' -> provider Halogen su EVO-X2; altro ->
+    manager principale (Unsloth/local-llm-manager). L'id reale va inviato
+    all'upstream senza prefisso."""
+    if model_id == "laris":
+        return "laris", model_id
+    if model_id.startswith(HALOGEN_PREFIX):
+        return "halogen", model_id[len(HALOGEN_PREFIX):]
+    return "main", model_id
+
+
+def open_for(provider: str):
+    """Function (payload, stream) -> response per il provider dato."""
+    return {"laris": agent_open, "halogen": halogen_open}.get(provider, upstream_open)
+
+
 def upstream_get(path, timeout=15):
     """GET request to upstream with Bearer auth header when token is set."""
     req = urllib.request.Request(auth_url(path))
@@ -550,7 +591,45 @@ def catalog(force=False):
     # Insert at top if not already present
     if not any(m.get("id") == "laris" for m in result):
         result.insert(0, laris_entry)
+    # Append Halogen.cpp provider models (EVO-X2)
+    result.extend(halogen_models())
     return result
+
+
+def halogen_models(force=False):
+    """Modelli del provider Halogen.cpp su EVO-X2, con id prefissato
+    'halogen/...'. Cache 15s; se il provider è offline la lista è vuota."""
+    now = time.time()
+    if not force and now - _halogen_cache["ts"] < 15:
+        return list(_halogen_cache["models"])
+    models = []
+    if HALOGEN_UPSTREAM:
+        try:
+            req = urllib.request.Request(HALOGEN_UPSTREAM + "/v1/models")
+            if HALOGEN_AUTH:
+                req.add_header("Authorization", f"Bearer {HALOGEN_AUTH}")
+            with urllib.request.urlopen(req, timeout=5) as r:
+                raw = json.loads(r.read().decode())
+            for m in raw.get("data", []):
+                if not isinstance(m, dict):
+                    continue
+                mid = m.get("id")
+                if not mid:
+                    continue
+                models.append({
+                    "id": HALOGEN_PREFIX + mid,
+                    "label": "⚡ " + (m.get("display_name") or mid) + " · Halogen (EVO-X2)",
+                    "alias": HALOGEN_PREFIX + mid,
+                    "available": True,
+                    "loaded": True,
+                    "status": "",
+                    "ctx": int(m.get("context_length") or m.get("max_model_len") or 262144),
+                    "provider": "halogen",
+                })
+        except Exception:
+            pass  # provider offline: nascosto dal catalogo, il resto funziona
+    _halogen_cache.update(ts=now, models=models)
+    return list(models)
 
 
 def model_ctx(model_id):
@@ -604,8 +683,9 @@ def summarize(model_id, msgs):
     transcript = "\n\n".join(
         "%s: %s" % (m["role"].upper(), m["content"]) for m in msgs
     )
+    provider, real_model = split_provider(model_id)
     payload = {
-        "model": model_id,
+        "model": real_model,
         "messages": [
             {"role": "system", "content": (
                 "Sei un compressore di contesto. Riassumi la conversazione in modo denso e "
@@ -619,7 +699,7 @@ def summarize(model_id, msgs):
         "max_tokens": SUMMARY_MAX_TOKENS,
         "temperature": 0.3,
     }
-    with upstream_open(payload, stream=False) as r:
+    with open_for(provider)(payload, stream=False) as r:
         resp = json.loads(r.read().decode())
     return (resp["choices"][0]["message"].get("content") or "").strip()
 
@@ -811,6 +891,8 @@ def make_handler():
                     return self._serve_static(name)
             if path == "/healthz":
                 return self._send({"ok": True, "upstream": UPSTREAM})
+            if path == "/api/live/status":
+                return self._handle_live_status()
             if path == "/api/session":
                 tok = token_from_request(self)
                 if not tok:
@@ -1019,6 +1101,8 @@ def make_handler():
                 return self._handle_upload()
             if path == "/api/stt":
                 return self._handle_stt()
+            if path == "/api/live/transcribe":
+                return self._handle_live_transcribe()
             if path == "/api/tts":
                 return self._handle_tts()
             if path == "/api/compress":
@@ -1153,6 +1237,111 @@ def make_handler():
             except Exception as e:
                 return self._send({"error": "STT non raggiungibile: %s" % e}, 502)
 
+        def _handle_live_transcribe(self):
+            """Audio multipart → Omni s2s :8891 (wav base64 input_audio). Fallback STT_URL."""
+            ctype = self.headers.get("Content-Type", "")
+            if "multipart/form-data" not in ctype:
+                return self._send({"error": "expected multipart/form-data"}, 400)
+            try:
+                body = self._read_body(limit=25 * 1024 * 1024)
+            except ValueError:
+                return self._send({"error": "audio troppo grande (max 25 MB)"}, 413)
+            # Extract raw audio bytes from multipart (first file part)
+            import cgi, io
+            env = {"REQUEST_METHOD": "POST", "CONTENT_TYPE": ctype,
+                   "CONTENT_LENGTH": str(len(body))}
+            try:
+                fs = cgi.FieldStorage(fp=io.BytesIO(body), environ=env, keep_blank_values=True)
+                audio_bytes = None
+                for key in fs:
+                    item = fs[key]
+                    if hasattr(item, "file") and item.file:
+                        audio_bytes = item.file.read()
+                        break
+                if not audio_bytes:
+                    raise ValueError("no file field")
+            except Exception:
+                return self._send({"error": "multipart parse fallito"}, 400)
+            # Convert webm → wav via ffmpeg
+            try:
+                proc = subprocess.run(
+                    ["ffmpeg", "-y", "-i", "-", "-acodec", "pcm_s16le",
+                     "-ar", "16000", "-ac", "1", "-f", "wav", "-"],
+                    input=audio_bytes, capture_output=True, timeout=30)
+                if proc.returncode != 0:
+                    raise RuntimeError(proc.stderr.decode(errors="replace")[:200])
+                wav_bytes = proc.stdout
+            except Exception:
+                # ffmpeg fail → fallback to STT_URL
+                if not STT_URL:
+                    return self._send({"error": "ffmpeg non disponibile e STT_URL non configurato"}, 502)
+                req = urllib.request.Request(
+                    STT_URL + "/transcribe", data=body, method="POST",
+                    headers={"Content-Type": ctype})
+                try:
+                    with urllib.request.urlopen(req, timeout=120) as r:
+                        return self._send(json.loads(r.read().decode()))
+                except Exception as e2:
+                    return self._send({"error": "STT fallback fallito: %s" % e2}, 502)
+            # Build Omni request
+            import base64
+            wav_b64 = base64.b64encode(wav_bytes).decode()
+            payload = json.dumps({
+                "model": "omni",
+                "messages": [{"role": "user", "content": [
+                    {"type": "text", "text": "Trascrivi esattamente l'audio, senza commenti."},
+                    {"type": "input_audio", "input_audio": {"data": wav_b64, "format": "wav"}}
+                ]}],
+                "max_tokens": 256
+            }).encode()
+            try:
+                omni_headers = {"Content-Type": "application/json"}
+                if OMNI_AUTH:
+                    omni_headers["Authorization"] = f"Bearer {OMNI_AUTH}"
+                # Use http.client for explicit connection management (avoids urllib pooling issues)
+                from urllib.parse import urlparse
+                parsed = urlparse(OMNI_BASE + "/chat/completions")
+                conn = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=5)
+                try:
+                    conn.request("POST", parsed.path, body=payload, headers=omni_headers)
+                    resp_raw = conn.getresponse()
+                    resp = json.loads(resp_raw.read().decode())
+                finally:
+                    conn.close()
+                text = resp["choices"][0]["message"]["content"].strip()
+                return self._send({"text": text})
+            except Exception:
+                # Omni down → fallback STT
+                if not STT_URL:
+                    return self._send({"error": "Omni non raggiungibile e STT_URL non configurato"}, 502)
+                req = urllib.request.Request(
+                    STT_URL + "/transcribe", data=body, method="POST",
+                    headers={"Content-Type": ctype})
+                try:
+                    with urllib.request.urlopen(req, timeout=120) as r:
+                        return self._send(json.loads(r.read().decode()))
+                except Exception as e3:
+                    return self._send({"error": "trascrizione fallita: %s" % e3}, 502)
+
+        def _handle_live_status(self):
+            """Check if Omni ASR is reachable. Returns {ready: bool}."""
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(OMNI_BASE + "/models")
+                conn = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=3)
+                try:
+                    headers = {}
+                    if OMNI_AUTH:
+                        headers["Authorization"] = f"Bearer {OMNI_AUTH}"
+                    conn.request("GET", parsed.path, headers=headers)
+                    resp = conn.getresponse()
+                    ready = resp.status == 200
+                finally:
+                    conn.close()
+                return self._send({"ready": ready})
+            except Exception:
+                return self._send({"ready": False})
+
         @staticmethod
         def _tts_clean(text):
             """Prepara la risposta per la voce: via markdown, codice, link."""
@@ -1166,30 +1355,52 @@ def make_handler():
             return re.sub(r"\s{2,}", " ", t).strip()
 
         def _handle_tts(self):
-            """Sintetizza la risposta in mp3 (edge-tts, voce it-IT configurabile)."""
+            """Sintetizza la risposta in mp3. Supertonic primario, edge-tts fallback."""
             body = self._json_body()
             text = self._tts_clean(str(body.get("text") or ""))
             if not text:
                 return self._send({"error": "testo vuoto"}, 400)
-            try:
-                import edge_tts
-            except ImportError:
-                return self._send({"error": "edge-tts non installato nel container"}, 501)
             voice = body.get("voice") or TTS_VOICE
-            import io as _io
-            buf = _io.BytesIO()
+            data = None
+            # Try Supertonic first (local ONNX, instant)
             try:
-                import asyncio
-
-                async def _gen():
-                    com = edge_tts.Communicate(text[:4000], voice)
-                    async for chunk in com.stream():
-                        if chunk.get("type") == "audio":
-                            buf.write(chunk["data"])
-                asyncio.run(_gen())
+                from supertonic import TTS as SupertonicTTS
+                import numpy as np, io as _io, wave, subprocess as _sp
+                synth = SupertonicTTS()
+                st_voice = body.get("supertonic_voice") or "M3"
+                style = synth.get_voice_style(st_voice)
+                audio_np, _ = synth.synthesize(text[:4000], voice_style=style, lang="it")
+                sr = synth.sample_rate
+                audio_int16 = (audio_np.flatten() * 32767).astype(np.int16)
+                wav_buf = _io.BytesIO()
+                with wave.open(wav_buf, "wb") as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)
+                    wf.setframerate(sr)
+                    wf.writeframes(audio_int16.tobytes())
+                wav_bytes = wav_buf.getvalue()
+                # Convert WAV → MP3 via ffmpeg
+                proc = _sp.run(
+                    ["ffmpeg", "-y", "-i", "-", "-codec:a", "libmp3lame", "-b:a", "64k", "-f", "mp3", "-"],
+                    input=wav_bytes, capture_output=True, timeout=30)
+                if proc.returncode == 0 and proc.stdout:
+                    data = proc.stdout
             except Exception as e:
-                return self._send({"error": "TTS fallita: %s" % e}, 502)
-            data = buf.getvalue()
+                print(f"[tts] supertonic failed: {e}", flush=True)
+            # Fallback to edge-tts
+            if not data:
+                try:
+                    import edge_tts, asyncio, io as _io
+                    buf = _io.BytesIO()
+                    async def _gen():
+                        com = edge_tts.Communicate(text[:4000], voice)
+                        async for chunk in com.stream():
+                            if chunk.get("type") == "audio":
+                                buf.write(chunk["data"])
+                    asyncio.run(_gen())
+                    data = buf.getvalue()
+                except Exception as e:
+                    return self._send({"error": "TTS fallita: %s" % e}, 502)
             if not data:
                 return self._send({"error": "TTS vuota"}, 502)
             self.send_response(200)
@@ -1221,7 +1432,8 @@ def make_handler():
             me = owner_key(tok)
 
             # auto-load model if the manager supports it (fire and forget on failure)
-            if model != "laris":
+            provider, real_model = split_provider(model)
+            if provider == "main":
                 load_model_if_needed(model)
 
             if not conv_id:
@@ -1280,7 +1492,7 @@ def make_handler():
                 file_blocks,
             )
             payload = {
-                "model": model,
+                "model": real_model,
                 "messages": msgs,
                 "stream": True,
                 "max_tokens": max_tokens,
@@ -1330,17 +1542,22 @@ def make_handler():
                     if stop_status.wait(2.0):
                         break
 
-            pump = threading.Thread(target=status_pump, daemon=True)
-            pump.start()
+            pump = None
+            if provider == "main":
+                # solo il manager principale ha una coda da mostrare; per
+                # halogen/laris il poller mostrerebbe stati fuorvianti
+                pump = threading.Thread(target=status_pump, daemon=True)
+                pump.start()
             t_stream = None
             ttft = None
             usage = None      # {prompt_tokens, completion_tokens, ...}
             timings = None    # timings llama.cpp (prefill/gen)
             try:
-                open_fn = agent_open if model == "laris" else upstream_open
+                open_fn = open_for(provider)
                 with open_fn(payload, stream=True) as resp:
                     stop_status.set()
-                    pump.join(timeout=5)  # azzera il pump prima di scrivere contenuti
+                    if pump:
+                        pump.join(timeout=5)  # azzera il pump prima di scrivere contenuti
                     t_stream = time.time()
                     for raw in resp:
                         line = raw.decode("utf-8", "replace").strip()

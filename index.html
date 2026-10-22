@@ -401,18 +401,18 @@
   #send:hover:not(:disabled) { background: var(--green); color: #000; box-shadow: 0 0 14px var(--green-glow); }
   #send:disabled { opacity: .3; cursor: default; }
   #mic {
-    border: 1px solid var(--border-bright); background: transparent;
-    color: var(--text); cursor: pointer; padding: 10px 14px; font-size: 15px;
-    transition: all .15s; flex-shrink: 0; border-radius: 6px;
+    position: relative; width: 48px; height: 48px; min-width: 48px;
+    border: 1px solid var(--border-bright); background: var(--bg-secondary);
+    border-radius: 50%; cursor: pointer; padding: 0; overflow: hidden;
+    transition: box-shadow .3s, border-color .3s; flex-shrink: 0;
   }
-  #mic:hover:not(:disabled) { background: var(--green); color: #000; box-shadow: 0 0 14px var(--green-glow); }
-  #mic.rec {
-    background: var(--red); color: #fff; border-color: var(--red);
-    font-size: 11px; font-weight: 700; letter-spacing: .06em;
-    animation: micPulse 1s ease-in-out infinite;
-  }
-  #mic.play { background: var(--green); color: #000; border-color: var(--green); }
-  @keyframes micPulse { 50% { box-shadow: 0 0 16px var(--red); } }
+  #mic canvas { display: block; width: 100%; height: 100%; }
+  #mic.listening { border-color: var(--green); box-shadow: 0 0 12px var(--green-glow); }
+  #mic.loading { border-color: var(--amber); box-shadow: 0 0 12px var(--amber); animation: micThink 1.2s ease-in-out infinite; }
+  #mic.thinking { border-color: var(--amber); box-shadow: 0 0 12px var(--amber); animation: micThink 1.2s ease-in-out infinite; }
+  #mic.speaking { border-color: var(--green); box-shadow: 0 0 16px var(--green-glow); animation: micSpeak 0.8s ease-in-out infinite; }
+  @keyframes micThink { 0%,100% { opacity: 0.7; } 50% { opacity: 1; } }
+  @keyframes micSpeak { 0%,100% { transform: scale(1); } 50% { transform: scale(1.05); } }
   #stop { background: transparent; color: var(--red); border-color: var(--red); display: none; }
   #stop:hover { background: var(--red); color: #000; }
   .composer-hint { margin-top: 6px; font-size: 9px; color: var(--text-dim); letter-spacing: 0.06em; opacity: .7; }
@@ -583,7 +583,7 @@
           <button id="attach-btn" title="Allega file di testo temporaneo (non salvato)">📎</button>
           <input type="file" id="file-input" multiple hidden>
           <textarea id="input" rows="1" placeholder="Scrivi un messaggio…"></textarea>
-          <button id="mic" title="Parla (trascrive e invia, risposta letta ad alta voce)">🎤</button>
+          <button id="mic" title="Modalità live: parla e ascolta in tempo reale"><canvas id="mic-canvas" width="48" height="48"></canvas></button>
           <button id="send">Invia</button>
           <button id="stop">Stop</button>
         </div>
@@ -1417,68 +1417,198 @@ function refreshSend() {
 }
 
 /* ── LIVE speech-to-speech: mic → STT → chat → TTS ───────── */
-let recorder = null, recChunks = [], recTimer = null, recSecs = 0;
 let audioEl = null, liveTurn = false;
 
 function hasText() { return ($("input").value || "").trim().length > 0; }
 function stopPlayback() { if (audioEl) { try { audioEl.pause(); } catch (e) {} audioEl = null; } }
 
+/* ── LIVE MODE: waveform + VAD + continuous Omni transcription ── */
+const micCanvas = document.getElementById('mic-canvas');
+const micCtx = micCanvas ? micCanvas.getContext('2d') : null;
+let liveActive = false, liveStream = null, liveAnalyser = null, liveAudioCtx = null;
+let liveAnimFrame = null, liveVadSilenceMs = 0, liveSpeechAccumMs = 0;
+let liveRecChunks = [], liveRecorder = null, liveSegmentStart = 0;
+let liveStatusTimer = null, liveModelReady = true;
+const LIVE_RMS_THRESHOLD = 0.02, LIVE_SILENCE_MS = 700, LIVE_MIN_SPEECH_MS = 600;
+const LIVE_SEGMENT_MAX_MS = 15000;
+
+function drawWaveform(dataArray) {
+    if (!micCtx) return;
+    const w = micCanvas.width, h = micCanvas.height;
+    micCtx.clearRect(0, 0, w, h);
+    const bars = 12, barW = w / bars * 0.6, gap = w / bars * 0.4;
+    const step = Math.floor(dataArray.length / bars);
+    for (let i = 0; i < bars; i++) {
+        const v = dataArray[i * step] / 255;
+        const barH = Math.max(2, v * h * 0.8);
+        const x = i * (barW + gap) + gap / 2;
+        const y = (h - barH) / 2;
+        micCtx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--green').trim() || '#4ade80';
+        micCtx.fillRect(x, y, barW, barH);
+    }
+}
+
+function drawIdleWaveform() {
+    if (!micCtx) return;
+    const w = micCanvas.width, h = micCanvas.height;
+    micCtx.clearRect(0, 0, w, h);
+    micCtx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--border-bright').trim() || '#555';
+    micCtx.lineWidth = 1;
+    micCtx.beginPath();
+    micCtx.moveTo(4, h/2);
+    micCtx.lineTo(w-4, h/2);
+    micCtx.stroke();
+}
+
 function micIdle() {
-  clearInterval(recTimer);
-  const m = $("mic");
-  m.classList.remove("rec", "play");
-  m.textContent = audioEl ? "🔊" : "🎤";
-  m.title = audioEl ? "Ferma la voce"
-    : "Parla (trascrive e invia; la risposta viene letta)";
+    const m = $("mic");
+    m.classList.remove("rec", "thinking");
+    if (audioEl) {
+        m.classList.add("speaking");
+    } else if (liveActive) {
+        m.classList.add("listening");
+    } else {
+        m.classList.remove("listening", "speaking");
+        drawIdleWaveform();
+    }
 }
 
 async function toggleMic() {
-  if (audioEl) { stopPlayback(); micIdle(); return; }          // barge-in
-  if (recorder && recorder.state === "recording") { recorder.stop(); return; }
-  if (!navigator.mediaDevices || !window.MediaRecorder) {
-    alert("Microfono non supportato da questo browser (serve HTTPS)."); return;
-  }
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    // Barge-in: stop TTS if playing
+    if (audioEl) { stopPlayback(); }
+    // Toggle off if already active
+    if (liveActive) { stopLiveMode(); return; }
+    if (!navigator.mediaDevices || !window.MediaRecorder) {
+        alert("Microfono non supportato (serve HTTPS)."); return;
+    }
+    try {
+        liveStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        liveAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (liveAudioCtx.state === 'suspended') await liveAudioCtx.resume();
+        const source = liveAudioCtx.createMediaStreamSource(liveStream);
+        liveAnalyser = liveAudioCtx.createAnalyser();
+        liveAnalyser.fftSize = 256;
+        source.connect(liveAnalyser);
+        liveActive = true;
+        $("mic").classList.add("listening");
+        $("mic").classList.remove("thinking", "speaking");
+        setPill("in ascolto…", "");
+        startLiveRecorder();
+        animateWaveform();
+        // Poll model status every 3s while active
+        liveStatusTimer = setInterval(async () => {
+            if (!liveActive) return;
+            try {
+                const r = await fetch("/api/live/status");
+                const d = await r.json();
+                liveModelReady = d.ready !== false;
+                if (!liveModelReady && !$("mic").classList.contains("thinking")) {
+                    $("mic").classList.remove("listening");
+                    $("mic").classList.add("loading");
+                    setPill("modello in carica…", "load");
+                } else if (liveModelReady && $("mic").classList.contains("loading")) {
+                    $("mic").classList.remove("loading");
+                    $("mic").classList.add("listening");
+                    setPill("in ascolto…", "");
+                }
+            } catch (e) {}
+        }, 3000);
+    } catch (e) {
+        setPill("", "");
+        if (e && e.name === "NotAllowedError")
+            alert("Permesso microfono negato: riattivalo nelle impostazioni.");
+    }
+}
+
+function startLiveRecorder() {
     const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-      ? "audio/webm;codecs=opus" : "";
-    recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : {});
-    recChunks = [];
-    recorder.ondataavailable = (e) => { if (e.data.size) recChunks.push(e.data); };
-    recorder.onstop = async () => {
-      stream.getTracks().forEach((t) => t.stop());
-      clearInterval(recTimer);
-      const m0 = $("mic"); m0.classList.remove("rec"); m0.textContent = "…";
-      const blob = new Blob(recChunks, { type: "audio/webm" });
-      micIdle();
-      if (blob.size < 3000) return;                            // troppo corto
-      setPill("trascrivo…", "");
-      const fd = new FormData();
-      fd.append("file", blob, "voice.webm");
-      let txt = "";
-      try {
-        const r = await fetch("/api/stt", { method: "POST", body: fd });
+        ? "audio/webm;codecs=opus" : "";
+    liveRecorder = new MediaRecorder(liveStream, mime ? { mimeType: mime } : {});
+    liveRecChunks = [];
+    liveSegmentStart = Date.now();
+    liveVadSilenceMs = 0;
+    liveSpeechAccumMs = 0;
+    liveRecorder.ondataavailable = (e) => { if (e.data.size) liveRecChunks.push(e.data); };
+    liveRecorder.start(200);
+}
+
+async function sendLiveSegment() {
+    if (!liveRecChunks.length) return;
+    const blob = new Blob([...liveRecChunks], { type: "audio/webm" });
+    liveRecChunks = [];
+    liveSegmentStart = Date.now();
+    liveSpeechAccumMs = 0;
+    liveVadSilenceMs = 0;
+    if (blob.size < 3000) return;
+    $("mic").classList.remove("listening");
+    $("mic").classList.add("thinking");
+    setPill("trascrivo…", "load");
+    const fd = new FormData();
+    fd.append("file", blob, "voice.webm");
+    let txt = "";
+    try {
+        const r = await fetch("/api/live/transcribe", { method: "POST", body: fd });
         const d = await r.json();
         txt = (d.text || "").trim();
-        if (d.error) setPill("errore STT", "err");
-      } catch (e) { setPill("errore STT", "err"); }
-      if (!txt) { setPill("", ""); return; }
-      liveTurn = true;
-      $("input").value = txt;
-      await send(true);
-    };
-    recorder.start();
-    recSecs = 0;
-    const m = $("mic");
-    m.classList.add("rec"); m.textContent = "■ 0\"";
-    m.title = "Stop e trascrivi";
-    recTimer = setInterval(() => { recSecs++; m.textContent = "■ " + recSecs + "\""; }, 1000);
-    setPill("ascolto…", "");
-  } catch (e) {
+        if (d.error) setPill("errore trascrizione", "err");
+    } catch (e) { setPill("errore trascrizione", "err"); }
+    $("mic").classList.remove("thinking");
+    if (txt) {
+        liveTurn = true;
+        $("input").value = txt;
+        await send(true);
+    } else {
+        if (liveActive) {
+            $("mic").classList.add("listening");
+            setPill("in ascolto…", "");
+        }
+    }
+}
+
+function animateWaveform() {
+    if (!liveActive || !liveAnalyser) return;
+    const bufLen = liveAnalyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufLen);
+    liveAnalyser.getByteTimeDomainData(dataArray);
+    drawWaveform(dataArray);
+    let sum = 0;
+    for (let i = 0; i < bufLen; i++) {
+        const v = (dataArray[i] - 128) / 128;
+        sum += v * v;
+    }
+    const rms = Math.sqrt(sum / bufLen);
+    if (rms > LIVE_RMS_THRESHOLD) {
+        liveVadSilenceMs = 0;
+        liveSpeechAccumMs += 20;
+    } else {
+        liveVadSilenceMs += 20;
+    }
+    if (liveSpeechAccumMs > LIVE_MIN_SPEECH_MS && liveVadSilenceMs > LIVE_SILENCE_MS) {
+        sendLiveSegment();
+    }
+    if (Date.now() - liveSegmentStart > LIVE_SEGMENT_MAX_MS && liveSpeechAccumMs > LIVE_MIN_SPEECH_MS) {
+        sendLiveSegment();
+    }
+    liveAnimFrame = requestAnimationFrame(animateWaveform);
+}
+
+function stopLiveMode() {
+    liveActive = false;
+    if (liveAnimFrame) cancelAnimationFrame(liveAnimFrame);
+    liveAnimFrame = null;
+    if (liveStatusTimer) clearInterval(liveStatusTimer);
+    liveStatusTimer = null;
+    if (liveRecorder && liveRecorder.state !== 'inactive') liveRecorder.stop();
+    liveRecorder = null;
+    if (liveStream) liveStream.getTracks().forEach(t => t.stop());
+    liveStream = null;
+    if (liveAudioCtx) liveAudioCtx.close().catch(() => {});
+    liveAudioCtx = null;
+    liveAnalyser = null;
+    liveRecChunks = [];
+    $("mic").classList.remove("listening", "thinking", "speaking");
+    drawIdleWaveform();
     setPill("", "");
-    if (e && e.name === "NotAllowedError")
-      alert("Permesso microfono negato: riattivalo nelle impostazioni del browser.");
-  }
 }
 
 async function speakLive(text) {
@@ -1487,11 +1617,23 @@ async function speakLive(text) {
   try {
     const r = await fetch("/api/tts", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }) });
+      body: JSON.stringify({ text, supertonic_voice: "M3" }) });
     if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || "tts " + r.status); }
     const blob = await r.blob();
     audioEl = new Audio(URL.createObjectURL(blob));
-    audioEl.onended = () => { audioEl = null; micIdle(); refreshSend(); setPill("", ""); };
+    $("mic").classList.remove("listening", "thinking");
+    $("mic").classList.add("speaking");
+    audioEl.onended = () => {
+        audioEl = null;
+        $("mic").classList.remove("speaking");
+        if (liveActive) {
+            $("mic").classList.add("listening");
+            setPill("in ascolto…", "");
+        } else {
+            micIdle();
+        }
+        refreshSend();
+    };
     await audioEl.play();
     micIdle(); refreshSend();
   } catch (e) {
@@ -1821,6 +1963,9 @@ $("key-btn").addEventListener("click", sessionKeyUI);
   $("input").addEventListener("blur", () => { stick = false; document.body.classList.remove("kb-open"); app.style.height = ""; app.style.transform = ""; });
   $("messages").addEventListener("scroll", () => { stick = atBottom(); });
 })();
+
+// Initialize idle waveform on load
+drawIdleWaveform();
 </script>
 <script src="/registerSW.js"></script>
 </body>
