@@ -61,6 +61,7 @@ TTS_VOICE = os.environ.get("TTS_VOICE", "it-IT-DiegoNeural")
 # Agent backend (Hermes API Server — Laris profile)
 AGENT_UPSTREAM = os.environ.get("AGENT_UPSTREAM", "http://127.0.0.1:8091").rstrip("/")
 AGENT_AUTH = os.environ.get("AGENT_AUTH", "")
+AGENT_ENABLED = os.environ.get("AGENT_ENABLED", "") == "1"  # Laris off dal 22/10/26
 # Provider addizionale: Halogen.cpp su EVO-X2 (OpenAI-compat, no auth). Svuotando
 # l'env l'HALOGEN_UPSTREAM il provider non compare nel catalogo.
 HALOGEN_UPSTREAM = os.environ.get("HALOGEN_UPSTREAM", "http://192.168.178.93:8731").rstrip("/")
@@ -576,21 +577,23 @@ def catalog(force=False):
     except Exception:
         if not _model_cache["models"]:
             _model_cache["models"] = []
-    # Prepend Laris agent as first option
+    # Laris agent: disattivato di default (AGENT_ENABLED=1 per riattivarlo).
+    # Il bridge punterebbe al gateway commanderpz su :8091, che blocca la
+    # sessione dell'operatore -> chat mai evase (22/10/26).
     result = list(_model_cache["models"])
-    laris_entry = {
-        "id": "laris",
-        "label": "🤖 Laris (agente)",
-        "alias": "laris",
-        "available": True,
-        "loaded": True,
-        "status": "",
-        "ctx": 131072,
-        "agent": True,
-    }
-    # Insert at top if not already present
-    if not any(m.get("id") == "laris" for m in result):
-        result.insert(0, laris_entry)
+    if AGENT_ENABLED:
+        laris_entry = {
+            "id": "laris",
+            "label": "🤖 Laris (agente)",
+            "alias": "laris",
+            "available": True,
+            "loaded": True,
+            "status": "",
+            "ctx": 131072,
+            "agent": True,
+        }
+        if not any(m.get("id") == "laris" for m in result):
+            result.insert(0, laris_entry)
     # Append Halogen.cpp provider models (EVO-X2)
     result.extend(halogen_models())
     return result
