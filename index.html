@@ -622,6 +622,8 @@ let abortCtl = null;
 let attached = [];   // temp files: {id, name, tokens_est}
 
 /* ── models ─────────────────────────────── */
+function modelUsable(m) { return !!m && (m.available || m.loaded); }
+
 async function loadModels() {
   try {
     const r = await fetch("/api/models");
@@ -629,16 +631,22 @@ async function loadModels() {
     if (!Array.isArray(data)) throw new Error(data.error || "bad response");
     MODELS = data;
     const sel = $("model-select");
+    const prev = sel.value || localStorage.getItem("dc_model") || "";
     sel.innerHTML = "";
-    const last = localStorage.getItem("dc_model");
     for (const m of MODELS) {
       const o = document.createElement("option");
       o.value = m.id;
-      o.textContent = (m.label || m.id) + (m.loaded ? " ●" : "");
-      if (m.id === last) o.selected = true;
+      // stato nel label: ● caricato, vuoto = pronto, ✗ = backend offline
+      o.textContent = (m.label || m.id) + (m.loaded ? " ●" : (!modelUsable(m) ? " ✗ offline" : ""));
+      o.disabled = !modelUsable(m);
       sel.appendChild(o);
     }
-    if (!sel.value && MODELS.length) sel.value = MODELS[0].id;
+    // selezione: tieni quella precedente se ancora usable, altrimenti la
+    // prima disponibile (mai un modello che darebbe errore)
+    const stillOk = MODELS.find((x) => x.id === prev && modelUsable(x));
+    const firstOk = MODELS.find(modelUsable);
+    if (stillOk) sel.value = prev;
+    else if (firstOk) { sel.value = firstOk.id; localStorage.setItem("dc_model", firstOk.id); }
     updatePill();
     refreshUsage();
   } catch (e) {
@@ -646,17 +654,22 @@ async function loadModels() {
   }
 }
 
-function currentModel() { return $("model-select").value || ""; }
+function currentModel() {
+  const id = $("model-select").value || "";
+  // se il modello selezionato è diventato offline, nessuna chat parte:
+  // tutti i call-site già fermano su valore vuoto
+  return modelUsable(MODELS.find((x) => x.id === id)) ? id : "";
+}
 function currentCtx() {
   const m = MODELS.find((x) => x.id === currentModel());
   return (m && m.ctx) || 131072;
 }
 
 function updatePill() {
-  const m = MODELS.find((x) => x.id === currentModel());
+  const m = MODELS.find((x) => x.id === ($("model-select").value || ""));
   if (!m) { setPill("nessun modello", "err"); return; }
-  setPill(m.loaded ? "caricato" : (m.available ? "pronto (load on demand)" : "non disponibile"),
-          m.loaded ? "ok" : (m.available ? "" : "err"));
+  if (!modelUsable(m)) { setPill("backend offline", "err"); return; }
+  setPill(m.loaded ? "caricato" : "pronto (load on demand)", m.loaded ? "ok" : "");
 }
 
 function setPill(text, cls) {
@@ -1891,6 +1904,15 @@ $("sidebar-backdrop").addEventListener("click", closeDrawer);
 /* ── wiring ─────────────────────────────── */
 $("stop").addEventListener("click", () => { if (abortCtl) abortCtl.abort(); });
 $("new-chat").addEventListener("click", () => { closeDrawer(); newChat(); });
+
+// il selettore resta cosciente dei modelli: refresh periodico (il catalogo
+// lato server ha cache 15s, quindi è economico). Mai durante lo streaming o
+// se l'utente ha il menu aperto.
+setInterval(() => {
+  if (streaming) return;
+  if (document.activeElement === $("model-select")) return;
+  loadModels();
+}, 20000);
 $("model-select").addEventListener("change", () => {
   localStorage.setItem("dc_model", currentModel());
   updatePill();

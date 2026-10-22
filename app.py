@@ -98,6 +98,7 @@ _files_lock = threading.Lock()
 FILE_STORE = {}              # fid -> {name, text, size, ts}  (RAM only, never persisted)
 _model_cache = {"ts": 0.0, "models": []}
 _halogen_cache = {"ts": 0.0, "models": []}
+_manager_ok = True  # False quando l'ultimo fetch /v1/models del manager è fallito
 
 
 def est_tokens(text):
@@ -547,10 +548,28 @@ def decode_text(data: bytes):
 
 # ---------------- context budgeting & compression ----------------
 
+def _laris_entry():
+    return {
+        "id": "laris",
+        "label": "🤖 Laris (agente)",
+        "alias": "laris",
+        "available": True,
+        "loaded": True,
+        "status": "",
+        "ctx": 131072,
+        "agent": True,
+    }
+
+
 def catalog(force=False):
+    global _manager_ok
     now = time.time()
     if not force and now - _model_cache["ts"] < 15:
-        return _model_cache["models"]
+        result = list(_model_cache["models"])
+        if AGENT_ENABLED and not any(m.get("id") == "laris" for m in result):
+            result.insert(0, _laris_entry())
+        result.extend(halogen_models())
+        return result
     try:
         with upstream_get("/v1/models", timeout=15) as r:
             raw = json.loads(r.read().decode())
@@ -574,26 +593,23 @@ def catalog(force=False):
                 "ctx": int(m.get("ctx") or FALLBACK_CTX),
             })
         _model_cache.update(ts=now, models=models)
+        _manager_ok = True
     except Exception:
-        if not _model_cache["models"]:
-            _model_cache["models"] = []
+        _manager_ok = False
+        # manager offline: i modelli restano in lista ma NON selezionabili
+        # (evita chat che partono su un backend morto). ts aggiornato comunque:
+        # senza, ogni /api/models ripeterebbe il timeout completo da 15s.
+        _model_cache.update(
+            ts=time.time(),  # NON now: calcolato prima del timeout da 15s,
+            models=[dict(m, available=False, loaded=False, status="offline")
+                    for m in _model_cache["models"]],
+        )
     # Laris agent: disattivato di default (AGENT_ENABLED=1 per riattivarlo).
     # Il bridge punterebbe al gateway commanderpz su :8091, che blocca la
     # sessione dell'operatore -> chat mai evase (22/10/26).
     result = list(_model_cache["models"])
-    if AGENT_ENABLED:
-        laris_entry = {
-            "id": "laris",
-            "label": "🤖 Laris (agente)",
-            "alias": "laris",
-            "available": True,
-            "loaded": True,
-            "status": "",
-            "ctx": 131072,
-            "agent": True,
-        }
-        if not any(m.get("id") == "laris" for m in result):
-            result.insert(0, laris_entry)
+    if AGENT_ENABLED and not any(m.get("id") == "laris" for m in result):
+        result.insert(0, _laris_entry())
     # Append Halogen.cpp provider models (EVO-X2)
     result.extend(halogen_models())
     return result
@@ -631,7 +647,7 @@ def halogen_models(force=False):
                 })
         except Exception:
             pass  # provider offline: nascosto dal catalogo, il resto funziona
-    _halogen_cache.update(ts=now, models=models)
+    _halogen_cache.update(ts=time.time(), models=models)  # post-fetch, non pre
     return list(models)
 
 
@@ -1436,6 +1452,9 @@ def make_handler():
 
             # auto-load model if the manager supports it (fire and forget on failure)
             provider, real_model = split_provider(model)
+            reason = unavailable_reason(model)
+            if reason:
+                return self._send({"error": reason}, 503)
             if provider == "main":
                 load_model_if_needed(model)
 
@@ -1643,6 +1662,24 @@ def make_handler():
             })
 
     return H
+
+
+def unavailable_reason(model: str):
+    """Motivo per cui `model` non può rispondere ora, o None se può.
+
+    Il catalogo è la fonte di verità: entry presente ma non available e non
+    loaded = backend offline; entry assente con manager giù = impossibile
+    verificare, meglio un errore pulito che un hang di 900s su porta filtrata."""
+    provider, _ = split_provider(model)
+    ent = next((m for m in catalog() if m.get("id") == model), None)
+    if ent is not None:
+        if not ent.get("available") and not ent.get("loaded"):
+            return "modello non disponibile: backend offline"
+        return None
+    # entry assente dal catalogo
+    if provider == "main" and _manager_ok:
+        return None  # manager vivo: potrebbe essere un buco di cache, lascia passare
+    return "modello non disponibile: provider offline o sconosciuto"
 
 
 def load_model_if_needed(model: str):
